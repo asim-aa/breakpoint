@@ -30,9 +30,6 @@ V1–V4 of the build plan are implemented and verified:
 | V4a | Arbiter (verdict/confidence/coverage) + SQLite persistence + CLI | ✅ done |
 | V4b | 6-problem eval vs. a non-adversarial self-check baseline | ⏳ built, blocked on OpenRouter free-tier daily quota (see below) |
 
-Hermes and OpenClaw (V5/V6 in the original charter) are out of scope for
-this build — see "What was cut" below.
-
 ## Structure
 
 ```
@@ -195,14 +192,3 @@ These are acceptable for a personal dev-machine prototype; before running
 this against fully untrusted code, add a real container/VM boundary (e.g.
 gVisor, Firecracker, or Docker with a locked-down seccomp profile and
 `--network none`).
-
-## What was cut
-
-Hermes (a persistent runtime) and OpenClaw (a chat interface) were scoped
-out of this build. Nothing in V1–V4 needs to change to add them later —
-they would wrap the existing `cli.py run` entry point rather than replacing
-anything here. What you lose by stopping at V4: no always-on chat surface,
-no unattended runtime (you invoke `breakpoint run` yourself rather than
-pointing the system at a spec file and walking away). The core claim —
-adversarial verify-and-fix loop, grounded in real execution, with a
-measured bug-catch rate — is fully present without them.
