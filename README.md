@@ -66,7 +66,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 
 ## Eval results
 
-On a 5-problem sample (one problem was skipped after a transient upstream provider outage — logged and handled gracefully, not a crash): **the Skeptic caught a real bug in the Prover's first attempt on 4 of 5 problems**, verified by actual execution. This is a small sample from one model pair — see [eval/report.md](eval/report.md) for the full breakdown, methodology, and an honest note on a baseline-measurement limitation in this specific run.
+On a 3-problem sample: **the Skeptic caught a real bug in the Prover's first attempt on 2 of 3 problems**, and on one of those (`first_last_index`), a non-adversarial self-check — the same model asked "does this look correct?" with no execution — said **"correct"** on the exact implementation that Breakpoint's real test run proved had a bug. That's the entire thesis of this project in one concrete example. This is a small sample from one model pair, deliberately kept small by OpenRouter's free-tier daily cap — see [eval/report.md](eval/report.md) for the full breakdown and methodology.
 
 ## Structure
 
