@@ -1,0 +1,38 @@
+=== Request: merge overlapping intervals in a list of [start, end] pairs ===
+
+--- Code ---
+def merge_intervals(intervals):
+    if not intervals:
+        return []
+    sorted_intervals = sorted(intervals, key=lambda x: x[0])
+    merged = []
+    current_start, current_end = sorted_intervals[0]
+    for start, end in sorted_intervals[1:]:
+        if start <= current_end:
+            current_end = max(current_end, end)
+        else:
+            merged.append([current_start, current_end])
+            current_start, current_end = start, end
+    merged.append([current_start, current_end])
+    return merged
+
+--- Tests ---
+  [PASS] def test_empty_list():
+  [FAIL] def test_none_input():
+         error: exited with code 1
+  [PASS] def test_single_interval():
+  [PASS] def test_zero_length_interval():
+  [PASS] def test_adjacent_intervals_merge():
+  [PASS] def test_unsorted_intervals():
+  [PASS] def test_reverse_sorted_intervals():
+  [PASS] def test_fully_overlapping_intervals():
+  [PASS] def test_nested_intervals_unsorted():
+  [PASS] def test_negative_intervals():
+  [PASS] def test_touching_at_boundary():
+  [PASS] def test_many_overlapping_chain():
+  [PASS] def test_duplicate_intervals():
+  [PASS] def test_overlap_and_non_overlap_mixed():
+  [PASS] def test_result_is_sorted_by_start():
+  ... 22 tests total, 21 pass, 1 real failure caught by execution
+
+=== Verdict: bugs_found ===

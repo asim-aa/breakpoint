@@ -1,0 +1,5 @@
+  id  verdict        rounds  bugs  request
+------------------------------------------
+   3  bugs_found          2     3  check whether a string is a valid palindrome, ignoring case, spaces, and punctuation
+   2  bugs_found          2     2  reverse the words in a sentence while preserving whitespace between them
+   1  round_passed        1     0  merge overlapping intervals

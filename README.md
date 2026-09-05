@@ -11,6 +11,10 @@ One agent (the **Prover**) implements a spec. A second agent (the **Skeptic**) �
 
 That distinction is the entire point of this project.
 
+![Breakpoint demo: the Prover writes an implementation, the Skeptic's tests run for real, one fails on a genuine edge case, and cli.py history shows persisted results across runs](demo/breakpoint-demo.gif)
+
+*(Replays real, previously-captured output from actual runs during development — see [demo/play.sh](demo/play.sh) for the source. `test_none_input` failing isn't a model's opinion — it's an actual, real crash that happened when the sandbox ran that exact input against that exact code.)*
+
 ## Why this exists
 
 Most "AI writes code" demos verify correctness by asking a language model whether the code *looks* right. That's judgment layered on judgment — no more reliable than asking the same model to grade its own test. Breakpoint replaces that with something unambiguous: generated tests are executed for real, against generated code, in a sandboxed subprocess with no network access and a hard timeout. Nothing in this system's verdicts is ever "the model said so."
@@ -49,39 +53,6 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | Execution | **Python `subprocess`** | The actual ground truth: runs Skeptic's tests against Prover's code with a hard timeout, stripped environment, isolated temp directory |
 | Persistence | **SQLite** | Every spec, every round's attempt, every test result — queryable, not just printed to a terminal |
 | Language | **Python 3.12** | Whole project, stdlib-first (`sqlite3`, `subprocess`, `argparse` — no unnecessary dependencies) |
-
-## See it work
-
-This is a real, abridged transcript from an actual run (`nvidia/nemotron-3-super-120b-a12b:free` as Prover, `minimax/minimax-m3:free` as Skeptic) — not a cherry-picked mockup:
-
-```
-$ python cli.py run "merge overlapping intervals in a list of [start, end] pairs"
-
---- Prover's implementation ---
-def merge_intervals(intervals):
-    if not intervals:
-        return []
-    sorted_intervals = sorted(intervals, key=lambda x: x[0])
-    merged = []
-    current_start, current_end = sorted_intervals[0]
-    for start, end in sorted_intervals[1:]:
-        if start <= current_end:
-            current_end = max(current_end, end)
-        else:
-            merged.append([current_start, current_end])
-            current_start, current_end = start, end
-    merged.append([current_start, current_end])
-    return merged
-
---- Skeptic's tests, executed for real ---
-  [PASS] test_empty_list
-  [FAIL] test_none_input          ← caught: no guard against `intervals=None`
-  [PASS] test_single_interval
-  [PASS] test_unsorted_input
-  ... 22 total, 21 pass, 1 real failure caught by execution
-```
-
-`test_none_input` failing isn't a model's opinion — it's a `TypeError` that actually happened when the sandbox ran that exact input against that exact code. That's the mechanism, end to end.
 
 ## Status
 
