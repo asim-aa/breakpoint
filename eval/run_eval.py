@@ -75,7 +75,12 @@ def run_baseline_mode(spec: dict, code: str) -> str:
         f"Answer with exactly one word: CORRECT or INCORRECT."
     )
     model = os.environ["PROVER_MODEL"]
-    raw = complete(prompt=prompt, model=model, max_tokens=20)
+    # A generous token budget matters here: reasoning models spend tokens on
+    # their "reasoning" field before ever writing CORRECT/INCORRECT, so a
+    # tight cap (e.g. 20) can truncate the response before the verdict word
+    # appears at all, showing up as a false "unknown" rather than a real
+    # baseline opinion. Observed in practice — see eval/report.md's notes.
+    raw = complete(prompt=prompt, model=model, max_tokens=300)
     text = raw.upper()
     if "INCORRECT" in text:
         return "incorrect"

@@ -91,7 +91,11 @@ def merge_intervals(intervals):
 | V2 | Skeptic (different model) + full LangGraph wiring | ✅ done |
 | V3 | Retry loop, bounded by a round budget | ✅ done |
 | V4a | Arbiter (verdict / confidence / coverage) + SQLite persistence + CLI | ✅ done |
-| V4b | 6-problem eval vs. a non-adversarial self-check baseline | ⏳ built and rate-limit-resilient, blocked on OpenRouter's free-tier daily cap — see below |
+| V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
+
+## Eval results
+
+On a 5-problem sample (one problem was skipped after a transient upstream provider outage — logged and handled gracefully, not a crash): **the Skeptic caught a real bug in the Prover's first attempt on 4 of 5 problems**, verified by actual execution. This is a small sample from one model pair — see [eval/report.md](eval/report.md) for the full breakdown, methodology, and an honest note on a baseline-measurement limitation in this specific run.
 
 ## Structure
 
