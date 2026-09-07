@@ -1,0 +1,36 @@
+name: Breakpoint Verify (example)
+
+# Manually triggered only, on purpose: this repo's own CI (test.yml)
+# already runs on every push/PR, and OpenRouter's free-tier daily quota
+# is shared and tight (see README) — an example workflow that
+# auto-triggered on every PR would silently compete with that budget.
+# Run it from the Actions tab when you actually want to try it.
+on:
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "Python file to verify"
+        required: true
+        default: "nodes/prover.py"
+      context:
+        description: "Optional context (e.g. what this function is meant to do)"
+        required: false
+        default: ""
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Breakpoint Verify on itself
+        uses: ./
+        with:
+          file: ${{ inputs.file }}
+          context: ${{ inputs.context }}
+          openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          prover-model: "nvidia/nemotron-3-super-120b-a12b:free"
+          skeptic-model: "minimax/minimax-m3:free"
+          # No PR exists in a manual workflow_dispatch run, so there's
+          # nothing to comment on — just show the report in the logs.
+          post-comment: "false"

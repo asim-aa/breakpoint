@@ -1,0 +1,58 @@
+name: "Breakpoint Verify"
+description: >
+  Adversarially verifies a Python function with real sandboxed execution —
+  a Skeptic model writes tests aimed at breaking it, they run for real,
+  and the verdict is a fact, not a second LLM's opinion. Reports findings
+  as a PR comment; never rewrites your code.
+author: "asim-aa"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  file:
+    description: "Path to the Python file containing the function to verify"
+    required: true
+  context:
+    description: "Optional context to help infer the spec (e.g. the PR description)"
+    required: false
+    default: ""
+  openrouter-api-key:
+    description: "OpenRouter API key"
+    required: true
+  prover-model:
+    description: "Model used to infer the spec from the existing code"
+    required: true
+  skeptic-model:
+    description: "Model used to write adversarial tests (must differ from prover-model)"
+    required: true
+  post-comment:
+    description: "Post the report as a PR comment (requires the default GITHUB_TOKEN)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install -r "${{ github.action_path }}/requirements.txt"
+
+    - name: Run Breakpoint verification
+      shell: bash
+      env:
+        OPENROUTER_API_KEY: ${{ inputs.openrouter-api-key }}
+        PROVER_MODEL: ${{ inputs.prover-model }}
+        SKEPTIC_MODEL: ${{ inputs.skeptic-model }}
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        ARGS=(--file "${{ inputs.file }}" --context "${{ inputs.context }}")
+        if [ "${{ inputs.post-comment }}" = "true" ]; then
+          ARGS+=(--post-comment)
+        fi
+        python "${{ github.action_path }}/action/verify_pr.py" "${ARGS[@]}"

@@ -87,3 +87,43 @@ def frame(request: str, retries: int = 2) -> dict:
         except (json.JSONDecodeError, ValueError) as e:
             last_error = e
     raise last_error
+
+
+INFER_SYSTEM_PROMPT = """You are the Framer in an adversarial code-verification
+system. You are given an EXISTING Python function implementation — not a
+request to write new code — and your job is to infer the formal spec it
+appears to implement, as STRICT JSON with exactly these keys, and no others:
+
+{
+  "function_name": "string",
+  "inputs": [{"name": "string", "type": "string", "description": "string"}],
+  "output": {"type": "string", "description": "string"},
+  "constraints": ["string", ...],
+  "examples": [{"input": ..., "output": ...}, ...]
+}
+
+Infer constraints from what the code's logic and any docstring/comments
+imply it should handle — do not just describe what the code currently
+does if a docstring or the function's apparent intent suggests it should
+handle more (e.g. if it looks like it's meant to handle empty input but
+doesn't, the constraint should still say empty input must be handled;
+this is exactly what a Skeptic will later test against).
+
+Output ONLY the JSON object. No markdown fences, no commentary, no
+explanation before or after."""
+
+
+def infer_spec_from_code(code: str, context: str = "", retries: int = 2) -> dict:
+    model = os.environ["PROVER_MODEL"]
+    prompt = f"Existing implementation:\n{code}"
+    if context:
+        prompt += f"\n\nAdditional context (e.g. PR description):\n{context}"
+
+    last_error = None
+    for _ in range(retries + 1):
+        raw = complete(prompt=prompt, model=model, system=INFER_SYSTEM_PROMPT)
+        try:
+            return _extract_json(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            last_error = e
+    raise last_error

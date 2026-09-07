@@ -71,12 +71,41 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
 | — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | ✅ done — `breakpoint patterns` |
 | — | Multi-model leaderboard: compares Prover/Skeptic pairs by convergence rate and bugs caught | ✅ done — `breakpoint leaderboard` |
+| — | GitHub Action: verifies an existing PR's code, not just generated code | ✅ built + unit-tested (18 tests); live end-to-end run pending an OpenRouter quota reset — see below |
 
 ## Eval results
 
 The eval now runs with the Validator active (see below), on N=5 of 6 problems — the 6th never completed after three attempts, due to a sustained Nvidia outage during this session, logged plainly rather than hidden. Earlier eval runs (before the Validator existed) showed the core thesis clearly: **a non-adversarial self-check said "correct" on 3 different implementations that real, executed tests proved were buggy.** Full breakdown, exact numbers, and known limitations for the current run — stated plainly, not smoothed over — are in [eval/report.md](eval/report.md).
 
 **The more interesting result from this update isn't in the eval's table at all.** Re-running a spec manually hit the exact failure mode that motivated building the Validator: a Skeptic test with genuinely invalid Python syntax, which — before this fix — would have failed identically every round and permanently blocked convergence, since no amount of fixing the implementation can satisfy an assertion that isn't valid code. With the Validator active, that test was caught for $0 by a local syntax check and correctly excluded, and the run **converged in round 2** instead of retrying forever. A second run confirmed the Validator doesn't over-correct either, letting a real, hard bug through when the Prover genuinely couldn't fix it in time. See `nodes/validator.py` and [eval/report.md](eval/report.md) for the full account.
+
+## GitHub Action
+
+Everything above generates *new* code from a spec. That's not what a PR verifier needs — a PR already has code; the point is judging whether *that* code is correct, without rewriting it. So this is a genuinely different mode, not just `cli.py run` wrapped in YAML:
+
+```
+verify_existing_code(code, context) -> Framer infers a spec FROM the code
+                                     -> Skeptic writes adversarial tests
+                                     -> Sandbox executes them for real
+                                     -> Validator filters invalid tests
+                                     -> verdict: bugs_found | no_bugs_found
+```
+
+No Prover, no retry loop — this reports findings on code a human already wrote; it doesn't rewrite anyone's PR. `action.yml` wraps this as a real composite GitHub Action:
+
+```yaml
+- uses: asim-aa/breakpoint@main
+  with:
+    file: src/merge.py
+    context: ${{ github.event.pull_request.body }}
+    openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+    prover-model: nvidia/nemotron-3-super-120b-a12b:free
+    skeptic-model: minimax/minimax-m3:free
+```
+
+**V1 scope, stated plainly:** verifies one file/function per invocation (passed explicitly, not parsed out of a multi-file diff) and only reports — a real bug found is a finding for a human, never an auto-applied fix. `.github/workflows/verify-example.yml` demonstrates it against this repo's own code, but is deliberately `workflow_dispatch`-only (manual trigger), not wired into every push/PR — this repo's own CI (`test.yml`) already runs on every push, and OpenRouter's shared daily quota is tight enough (see below) that an auto-triggering example would silently compete with it.
+
+**Honestly: built and unit-tested (18 tests, `verify.py` + `nodes/framer.py`'s `infer_spec_from_code` + `action/verify_pr.py`, every LLM call mocked), but not yet run live end-to-end** — that needs OpenRouter quota this session has been fighting for all week. The orchestration logic itself reuses `find_bugs`, `run_test`, and `validate_test` exactly as they run in the main graph, all of which *are* proven live elsewhere in this README — this mode is new wiring around already-proven parts, not unproven logic from scratch.
 
 ## Structure
 
@@ -98,7 +127,11 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/              85 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
+verify.py           Verifies EXISTING code (no Prover, no retry loop) — the GitHub Action's core
+action.yml          Composite GitHub Action wrapping verify.py for CI use
+action/
+  verify_pr.py      CLI entry point: reads a file, runs verify.py, formats + optionally posts a PR comment
+tests/              103 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 
 ## Quickstart
@@ -112,7 +145,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full test suite (85 tests) — no OpenRouter API key needed
+# Full test suite (103 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace

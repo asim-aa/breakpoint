@@ -9,7 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from nodes.framer import _extract_json, _find_balanced_object
+import nodes.framer as framer
+from nodes.framer import _extract_json, _find_balanced_object, infer_spec_from_code
 
 
 def test_extracts_clean_json():
@@ -65,3 +66,64 @@ def test_find_balanced_object_handles_escaped_quotes():
     text = '{"a": "value with \\" an escaped quote and a } brace"}'
     result = _find_balanced_object(text)
     assert result == text
+
+
+def test_infer_spec_from_code_includes_code_in_prompt(monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "fake-model")
+    captured = {}
+
+    def fake_complete(prompt, model, system=None):
+        captured["prompt"] = prompt
+        captured["system"] = system
+        return '{"function_name": "f", "inputs": [], "output": {}, "constraints": [], "examples": []}'
+
+    monkeypatch.setattr(framer, "complete", fake_complete)
+
+    infer_spec_from_code("def f(x):\n    return x")
+    assert "def f(x):" in captured["prompt"]
+    assert "EXISTING Python function" in captured["system"]
+
+
+def test_infer_spec_from_code_includes_context_when_given(monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "fake-model")
+    captured = {}
+
+    def fake_complete(prompt, model, system=None):
+        captured["prompt"] = prompt
+        return '{"function_name": "f", "inputs": [], "output": {}, "constraints": [], "examples": []}'
+
+    monkeypatch.setattr(framer, "complete", fake_complete)
+
+    infer_spec_from_code("def f(x):\n    return x", context="Fixes a bug in list handling")
+    assert "Fixes a bug in list handling" in captured["prompt"]
+
+
+def test_infer_spec_from_code_omits_context_section_when_not_given(monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "fake-model")
+    captured = {}
+
+    def fake_complete(prompt, model, system=None):
+        captured["prompt"] = prompt
+        return '{"function_name": "f", "inputs": [], "output": {}, "constraints": [], "examples": []}'
+
+    monkeypatch.setattr(framer, "complete", fake_complete)
+
+    infer_spec_from_code("def f(x):\n    return x")
+    assert "Additional context" not in captured["prompt"]
+
+
+def test_infer_spec_from_code_retries_on_malformed_json(monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "fake-model")
+    responses = iter(["not json", '{"function_name": "f", "inputs": [], "output": {}, "constraints": [], "examples": []}'])
+    monkeypatch.setattr(framer, "complete", lambda prompt, model, system=None: next(responses))
+
+    result = infer_spec_from_code("def f(x):\n    return x", retries=2)
+    assert result["function_name"] == "f"
+
+
+def test_infer_spec_from_code_raises_after_exhausting_retries(monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "fake-model")
+    monkeypatch.setattr(framer, "complete", lambda prompt, model, system=None: "still not json")
+
+    with pytest.raises(ValueError):
+        infer_spec_from_code("def f(x):\n    return x", retries=1)
