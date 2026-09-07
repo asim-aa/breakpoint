@@ -157,3 +157,41 @@ def list_patterns(db_path: str = storage.DB_PATH) -> list[dict]:
         return rows
     finally:
         conn.close()
+
+
+def patterns_by_prover_model(db_path: str = storage.DB_PATH) -> dict[str, list[dict]]:
+    """Breaks every bug pattern down by which Prover model actually
+    produced each occurrence — "which bug classes does THIS model
+    reliably miss," concretely. No new schema needed: bug_patterns already
+    links to spec_ids, and specs already records prover_model (for the
+    leaderboard) — this just joins the two client-side, since
+    example_spec_ids is a JSON list, not a column SQL can join on directly.
+
+    Returns {prover_model: [{"description", "pattern_id", "count"}, ...]},
+    each model's list sorted by count descending. A pattern seen on 3
+    specs from model A and 1 from model B contributes a count of 3 under
+    A and 1 under B — this is about attributing bugs to the model that
+    wrote them, not just listing every pattern under every model.
+    """
+    patterns = list_patterns(db_path=db_path)
+    all_spec_ids = sorted({sid for p in patterns for sid in p["example_spec_ids"]})
+    spec_models = storage.get_prover_models_by_ids(all_spec_ids, db_path=db_path)
+
+    breakdown: dict[str, dict[int, dict]] = {}
+    for pattern in patterns:
+        counts_by_model: dict[str, int] = {}
+        for spec_id in pattern["example_spec_ids"]:
+            model = spec_models.get(spec_id, "unknown")
+            counts_by_model[model] = counts_by_model.get(model, 0) + 1
+
+        for model, count in counts_by_model.items():
+            breakdown.setdefault(model, {})[pattern["id"]] = {
+                "pattern_id": pattern["id"],
+                "description": pattern["description"],
+                "count": count,
+            }
+
+    return {
+        model: sorted(entries.values(), key=lambda e: e["count"], reverse=True)
+        for model, entries in breakdown.items()
+    }

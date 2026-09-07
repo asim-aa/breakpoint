@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Model Report — Breakpoint{% endblock %}
+{% block content %}
+  <h1>Which bug patterns does each model reliably miss?</h1>
+  <p class="muted">Same clusters as Bug Patterns, attributed to the Prover model whose spec each occurrence came from.</p>
+  {% if not breakdown %}
+    <p class="muted">No bug patterns recorded yet.</p>
+  {% else %}
+    {% for model, entries in breakdown.items() %}
+      <h3>{{ model }}</h3>
+      <table>
+        <tr><th>Bug pattern</th><th>Count</th></tr>
+        {% for e in entries %}
+          <tr>
+            <td>{{ e.description }}</td>
+            <td>
+              <div class="bar-cell">
+                <span class="bar-value">{{ e.count }}</span>
+                <div class="bar-track"><div class="bar-fill pattern" style="width: {{ e.bar_pct }}%"></div></div>
+              </div>
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    {% endfor %}
+  {% endif %}
+{% endblock %}

@@ -55,6 +55,14 @@ def create_app(db_path: str = storage.DB_PATH) -> Flask:
         rows = _with_bar_widths(rows, "total_bugs_caught")
         return render_template("leaderboard.html", rows=rows)
 
+    @app.route("/models")
+    def models():
+        breakdown = memory.patterns_by_prover_model(db_path=app.config["DB_PATH"])
+        breakdown = {
+            model: _with_bar_widths(entries, "count") for model, entries in breakdown.items()
+        }
+        return render_template("models.html", breakdown=breakdown)
+
     return app
 
 

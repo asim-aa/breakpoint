@@ -161,3 +161,26 @@ def test_leaderboard_page_renders_bar_chart_widths(client, db_path, monkeypatch)
     response = client.get("/leaderboard")
     assert response.status_code == 200
     assert b"width: 100.0%" in response.data
+
+
+def test_models_page_shows_empty_state(client):
+    response = client.get("/models")
+    assert response.status_code == 200
+    assert b"No bug patterns recorded yet" in response.data
+
+
+def test_models_page_attributes_bug_to_prover_model(client, db_path):
+    import cli
+
+    history = _history([False], error="TypeError: 'NoneType' object is not iterable")
+    spec_id = storage.save_run("merge intervals", {}, history, {}, db_path=db_path)
+    cli._record_bugs_for_memory(spec_id, history, db_path=db_path)
+
+    conn = storage.get_connection(db_path)
+    conn.execute("UPDATE specs SET prover_model = 'nemotron-test' WHERE id = ?", (spec_id,))
+    conn.commit()
+    conn.close()
+
+    response = client.get("/models")
+    assert response.status_code == 200
+    assert b"nemotron-test" in response.data

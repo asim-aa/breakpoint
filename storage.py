@@ -290,3 +290,20 @@ def get_run_detail(spec_id: int, db_path: str = DB_PATH) -> dict | None:
         }
     finally:
         conn.close()
+
+
+def get_prover_models_by_ids(spec_ids: list[int], db_path: str = DB_PATH) -> dict[int, str]:
+    """Maps spec_id -> prover_model (or 'unknown' for legacy specs predating
+    the leaderboard). Used to break bug patterns down by which model
+    actually produced each occurrence — see memory.py."""
+    if not spec_ids:
+        return {}
+    conn = get_connection(db_path)
+    try:
+        placeholders = ",".join("?" for _ in spec_ids)
+        cur = conn.execute(
+            f"SELECT id, prover_model FROM specs WHERE id IN ({placeholders})", spec_ids
+        )
+        return {row[0]: (row[1] or "unknown") for row in cur.fetchall()}
+    finally:
+        conn.close()

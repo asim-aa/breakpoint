@@ -144,3 +144,70 @@ def test_cmd_leaderboard_prints_table_when_runs_exist(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "prover-a" in captured.out
     assert "skeptic-a" in captured.out
+
+
+class _Args:
+    def __init__(self, model=None):
+        self.model = model
+
+
+def test_format_model_report_lists_entries():
+    lines = cli._format_model_report(
+        "prover-a", [{"description": "none input", "count": 3}, {"description": "off by one", "count": 1}]
+    )
+    body = "\n".join(lines)
+    assert "prover-a" in body
+    assert "none input" in body
+    assert "off by one" in body
+
+
+def test_cmd_model_report_prints_message_when_no_patterns(monkeypatch, capsys):
+    monkeypatch.setattr(cli.memory, "patterns_by_prover_model", lambda: {})
+    cli.cmd_model_report(_Args())
+    captured = capsys.readouterr()
+    assert "No bug patterns recorded" in captured.out
+
+
+def test_cmd_model_report_shows_all_models_when_none_specified(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.memory,
+        "patterns_by_prover_model",
+        lambda: {
+            "prover-a": [{"description": "none input", "count": 2, "pattern_id": 1}],
+            "prover-b": [{"description": "off by one", "count": 1, "pattern_id": 2}],
+        },
+    )
+    cli.cmd_model_report(_Args())
+    captured = capsys.readouterr()
+    assert "prover-a" in captured.out
+    assert "prover-b" in captured.out
+    assert "none input" in captured.out
+    assert "off by one" in captured.out
+
+
+def test_cmd_model_report_filters_to_one_model(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.memory,
+        "patterns_by_prover_model",
+        lambda: {
+            "prover-a": [{"description": "none input", "count": 2, "pattern_id": 1}],
+            "prover-b": [{"description": "off by one", "count": 1, "pattern_id": 2}],
+        },
+    )
+    cli.cmd_model_report(_Args(model="prover-a"))
+    captured = capsys.readouterr()
+    assert "none input" in captured.out
+    assert "prover-b" not in captured.out
+    assert "off by one" not in captured.out
+
+
+def test_cmd_model_report_unknown_model_lists_known_ones(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.memory,
+        "patterns_by_prover_model",
+        lambda: {"prover-a": [{"description": "none input", "count": 2, "pattern_id": 1}]},
+    )
+    cli.cmd_model_report(_Args(model="nonexistent-model"))
+    captured = capsys.readouterr()
+    assert "No bugs recorded" in captured.out
+    assert "prover-a" in captured.out

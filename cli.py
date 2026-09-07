@@ -138,6 +138,38 @@ def cmd_leaderboard(args):
     )
 
 
+def _format_model_report(model: str, entries: list[dict]) -> list[str]:
+    lines = [f"Bug patterns attributed to {model}:", ""]
+    header = f"{'description':<32}  {'count':>5}"
+    lines.append(header)
+    lines.append("-" * len(header))
+    for entry in entries:
+        lines.append(f"{entry['description'][:32]:<32}  {entry['count']:>5}")
+    return lines
+
+
+def cmd_model_report(args):
+    breakdown = memory.patterns_by_prover_model()
+    if not breakdown:
+        print("No bug patterns recorded yet — run `breakpoint run` on a few specs first.")
+        return
+
+    if args.model:
+        if args.model not in breakdown:
+            known = ", ".join(sorted(breakdown.keys()))
+            print(f"No bugs recorded for prover model '{args.model}'. Known models: {known}")
+            return
+        for line in _format_model_report(args.model, breakdown[args.model]):
+            print(line)
+        return
+
+    for i, model in enumerate(sorted(breakdown.keys())):
+        if i > 0:
+            print()
+        for line in _format_model_report(model, breakdown[model]):
+            print(line)
+
+
 def cmd_dashboard(args):
     # Imported here, not at module load: every other command works even if
     # Flask somehow isn't installed, since only this one needs it.
@@ -168,6 +200,15 @@ def main():
         "leaderboard", help="compare Prover/Skeptic model pairs across all recorded runs"
     )
     leaderboard_parser.set_defaults(func=cmd_leaderboard)
+
+    model_report_parser = subparsers.add_parser(
+        "model-report",
+        help="which bug patterns a specific (or every) Prover model reliably produces",
+    )
+    model_report_parser.add_argument(
+        "model", nargs="?", default=None, help="filter to one prover model (default: all)"
+    )
+    model_report_parser.set_defaults(func=cmd_model_report)
 
     dashboard_parser = subparsers.add_parser(
         "dashboard", help="start a local web dashboard over runs/patterns/leaderboard"

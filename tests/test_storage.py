@@ -359,3 +359,28 @@ def test_get_run_detail_includes_model_pair(db_path, monkeypatch):
     detail = storage.get_run_detail(spec_id, db_path=db_path)
     assert detail["prover_model"] == "prover-x"
     assert detail["skeptic_model"] == "skeptic-y"
+
+
+def test_get_prover_models_by_ids_returns_matching_map(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-a")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-a")
+    id1 = storage.save_run("req1", {}, _history([True]), {}, db_path=db_path)
+
+    monkeypatch.setenv("PROVER_MODEL", "prover-b")
+    id2 = storage.save_run("req2", {}, _history([True]), {}, db_path=db_path)
+
+    result = storage.get_prover_models_by_ids([id1, id2], db_path=db_path)
+    assert result == {id1: "prover-a", id2: "prover-b"}
+
+
+def test_get_prover_models_by_ids_maps_legacy_null_to_unknown(db_path, monkeypatch):
+    monkeypatch.delenv("PROVER_MODEL", raising=False)
+    monkeypatch.delenv("SKEPTIC_MODEL", raising=False)
+    spec_id = storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
+
+    result = storage.get_prover_models_by_ids([spec_id], db_path=db_path)
+    assert result[spec_id] == "unknown"
+
+
+def test_get_prover_models_by_ids_empty_list_returns_empty_dict(db_path):
+    assert storage.get_prover_models_by_ids([], db_path=db_path) == {}

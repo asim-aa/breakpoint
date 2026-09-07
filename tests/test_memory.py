@@ -127,3 +127,52 @@ def test_cosine_of_identical_vectors_is_one():
 
 def test_cosine_of_orthogonal_vectors_is_zero():
     assert memory._cosine([1.0, 0.0], [0.0, 1.0]) == pytest.approx(0.0)
+
+
+def test_patterns_by_prover_model_attributes_bugs_to_the_model_that_wrote_them(
+    db_path, fake_embed, monkeypatch
+):
+    # Two specs from prover-a hit the "none input" bug; one spec from
+    # prover-b hits a genuinely different bug.
+    monkeypatch.setattr(memory, "_bug_signature", lambda t, e: "none input: typeerror")
+    memory.record_bug(spec_id=1, test_code="def test_none_input():\n    pass", error="e", db_path=db_path)
+    memory.record_bug(spec_id=2, test_code="def test_none_input():\n    pass", error="e", db_path=db_path)
+
+    monkeypatch.setattr(memory, "_bug_signature", lambda t, e: "reversed words: assertionerror")
+    memory.record_bug(spec_id=3, test_code="def test_reversed_words():\n    pass", error="e", db_path=db_path)
+
+    # record_bug() only needs a spec_id, not a real spec row, so create
+    # minimal ones directly (save_run() normally does this as part of a
+    # real run) to attach a prover_model for get_prover_models_by_ids to find.
+    conn = storage.get_connection(db_path)
+    for sid in (1, 2, 3):
+        conn.execute(
+            "INSERT OR IGNORE INTO specs (id, request, spec_json, created_at) VALUES (?, 'r', '{}', 'now')",
+            (sid,),
+        )
+    conn.execute("UPDATE specs SET prover_model = 'prover-a' WHERE id IN (1, 2)")
+    conn.execute("UPDATE specs SET prover_model = 'prover-b' WHERE id = 3")
+    conn.commit()
+    conn.close()
+
+    breakdown = memory.patterns_by_prover_model(db_path=db_path)
+
+    assert breakdown["prover-a"][0]["description"] == "none input"
+    assert breakdown["prover-a"][0]["count"] == 2
+    assert breakdown["prover-b"][0]["description"] == "reversed words"
+    assert breakdown["prover-b"][0]["count"] == 1
+
+
+def test_patterns_by_prover_model_uses_unknown_for_legacy_specs(db_path, fake_embed, monkeypatch):
+    monkeypatch.setattr(memory, "_bug_signature", lambda t, e: "none input: typeerror")
+    memory.record_bug(spec_id=1, test_code="def test_none_input():\n    pass", error="e", db_path=db_path)
+    # No spec row at all for id=1 -> get_prover_models_by_ids has nothing
+    # to find, defaulting to "unknown" rather than crashing.
+
+    breakdown = memory.patterns_by_prover_model(db_path=db_path)
+    assert "unknown" in breakdown
+    assert breakdown["unknown"][0]["description"] == "none input"
+
+
+def test_patterns_by_prover_model_empty_when_no_bugs(db_path, fake_embed):
+    assert memory.patterns_by_prover_model(db_path=db_path) == {}
