@@ -11,8 +11,16 @@ branding:
 
 inputs:
   file:
-    description: "Path to the Python file containing the function to verify"
-    required: true
+    description: "Path to one Python file to verify. Omit if using diff-base instead."
+    required: false
+    default: ""
+  diff-base:
+    description: >
+      Git ref to diff against (e.g. the PR's base branch) — auto-detects every
+      changed .py file instead of requiring an exact path. Exactly one of
+      `file` or `diff-base` must be set.
+    required: false
+    default: ""
   context:
     description: "Optional context to help infer the spec (e.g. the PR description)"
     required: false
@@ -51,7 +59,15 @@ runs:
         SKEPTIC_MODEL: ${{ inputs.skeptic-model }}
         GH_TOKEN: ${{ github.token }}
       run: |
-        ARGS=(--file "${{ inputs.file }}" --context "${{ inputs.context }}")
+        if [ -n "${{ inputs.file }}" ]; then
+          ARGS=(--file "${{ inputs.file }}")
+        elif [ -n "${{ inputs.diff-base }}" ]; then
+          ARGS=(--diff-base "${{ inputs.diff-base }}")
+        else
+          echo "Set exactly one of 'file' or 'diff-base'." >&2
+          exit 2
+        fi
+        ARGS+=(--context "${{ inputs.context }}")
         if [ "${{ inputs.post-comment }}" = "true" ]; then
           ARGS+=(--post-comment)
         fi

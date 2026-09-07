@@ -104,3 +104,81 @@ def test_main_posts_comment_when_flag_given(monkeypatch, tmp_path):
     with pytest.raises(SystemExit):
         verify_pr.main()
     assert len(posted) == 1
+
+
+def test_file_and_diff_base_are_mutually_exclusive(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", "a.py", "--diff-base", "main"])
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+    assert exc_info.value.code == 2  # argparse's own usage-error code
+
+
+def test_diff_base_verifies_every_detected_file(monkeypatch, tmp_path):
+    f1 = tmp_path / "a.py"
+    f2 = tmp_path / "b.py"
+    f1.write_text("def a(): pass")
+    f2.write_text("def b(): pass")
+
+    calls = []
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [str(f1), str(f2)])
+    monkeypatch.setattr(
+        verify_pr,
+        "verify_existing_code",
+        lambda code, context="": calls.append(code) or {
+            "verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": [],
+        },
+    )
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+
+    assert exc_info.value.code == 0
+    assert len(calls) == 2  # both detected files were actually verified
+
+
+def test_diff_base_exits_nonzero_if_any_file_has_bugs(monkeypatch, tmp_path):
+    f1 = tmp_path / "a.py"
+    f2 = tmp_path / "b.py"
+    f1.write_text("def a(): pass")
+    f2.write_text("def b(): pass")
+
+    results = iter([
+        {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []},
+        {"verdict": "bugs_found", "tests": [], "real_bugs": [{"test_code": "t", "error": "e"}], "invalid_tests": []},
+    ])
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [str(f1), str(f2)])
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": next(results))
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+    assert exc_info.value.code == 1  # nonzero because ONE of the two files had a real bug
+
+
+def test_diff_base_with_no_changed_files_exits_zero_without_verifying(monkeypatch, capsys):
+    called = []
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [])
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+
+    assert exc_info.value.code == 0
+    assert called == []
+    assert "nothing to verify" in capsys.readouterr().out
+
+
+def test_diff_base_error_exits_with_code_2_and_clear_message(monkeypatch, capsys):
+    def raise_error(base_ref):
+        raise RuntimeError("git diff against 'bad-ref' failed: unknown revision")
+
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", raise_error)
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "bad-ref"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+
+    assert exc_info.value.code == 2
+    assert "Could not determine changed files" in capsys.readouterr().out

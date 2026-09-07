@@ -1,14 +1,14 @@
-"""Entry point for the Breakpoint GitHub Action: verifies one existing
-Python file adversarially and reports findings — never rewrites code.
+"""Entry point for the Breakpoint GitHub Action: verifies existing Python
+code adversarially and reports findings — never rewrites code.
 
-V1 scope, stated plainly: verifies a single file/function per invocation
-(passed explicitly, not parsed out of a multi-file diff), and only
-reports what it finds. If a real bug turns up, that's a finding for a
-human to act on, not something this auto-fixes into the PR.
+Two ways to point it at code: --file for one explicit path, or --diff-base
+to auto-detect every changed .py file against a git ref (e.g. the PR's
+base branch) — closing the "not parsed out of a multi-file diff"
+limitation this file used to state. Either way, still verify-only: a real
+bug found is a finding for a human, never an auto-applied fix.
 """
 
 import argparse
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from diff_utils import get_changed_python_files
 from verify import verify_existing_code
 
 
@@ -71,7 +72,13 @@ def post_pr_comment(body: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--file", required=True, help="Path to the Python file to verify")
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--file", help="Path to one Python file to verify")
+    target.add_argument(
+        "--diff-base",
+        help="Git ref to diff against (e.g. origin/main) — auto-detects every "
+        "changed .py file instead of requiring an exact path",
+    )
     parser.add_argument("--context", default="", help="Optional context, e.g. a PR description")
     parser.add_argument(
         "--post-comment",
@@ -80,16 +87,34 @@ def main():
     )
     args = parser.parse_args()
 
-    code = Path(args.file).read_text()
-    result = verify_existing_code(code, context=args.context)
-    report = format_report(args.file, result)
+    if args.file:
+        files = [args.file]
+    else:
+        try:
+            files = get_changed_python_files(args.diff_base)
+        except RuntimeError as e:
+            print(f"Could not determine changed files: {e}")
+            sys.exit(2)
+        if not files:
+            print(f"No changed .py files found against {args.diff_base} — nothing to verify.")
+            sys.exit(0)
 
-    print(report)
+    reports = []
+    any_bugs_found = False
+    for file_path in files:
+        code = Path(file_path).read_text()
+        result = verify_existing_code(code, context=args.context)
+        reports.append(format_report(file_path, result))
+        if result["verdict"] == "bugs_found":
+            any_bugs_found = True
+
+    combined_report = "\n\n---\n\n".join(reports)
+    print(combined_report)
 
     if args.post_comment:
-        post_pr_comment(report)
+        post_pr_comment(combined_report)
 
-    sys.exit(1 if result["verdict"] == "bugs_found" else 0)
+    sys.exit(1 if any_bugs_found else 0)
 
 
 if __name__ == "__main__":

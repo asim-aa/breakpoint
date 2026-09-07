@@ -9,9 +9,13 @@ on:
   workflow_dispatch:
     inputs:
       file:
-        description: "Python file to verify"
-        required: true
+        description: "Python file to verify (leave blank to use diff-base instead)"
+        required: false
         default: "nodes/prover.py"
+      diff-base:
+        description: "Git ref to diff against instead of a fixed file, e.g. HEAD~1"
+        required: false
+        default: ""
       context:
         description: "Optional context (e.g. what this function is meant to do)"
         required: false
@@ -22,11 +26,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # diff-base mode needs real history to diff against — GitHub's
+          # default shallow (depth-1) checkout would make `git diff
+          # <base>...HEAD` fail with "unknown revision" for anything but
+          # the immediately preceding commit.
+          fetch-depth: 0
 
       - name: Run Breakpoint Verify on itself
         uses: ./
         with:
           file: ${{ inputs.file }}
+          diff-base: ${{ inputs.diff-base }}
           context: ${{ inputs.context }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           prover-model: "nvidia/nemotron-3-super-120b-a12b:free"
