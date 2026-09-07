@@ -6,9 +6,33 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import memory
 import storage
 from graph import build_graph
 from state import DEFAULT_MAX_ROUNDS
+
+
+def _record_bugs_for_memory(spec_id: int, history: list, db_path: str = storage.DB_PATH):
+    # Same dedup as arbiter.py's bugs_caught: a bug that failed identically
+    # across several retry rounds is one catch, not several. Keeps the
+    # first error message seen for each distinct test.
+    real_bugs = {}
+    for record in history:
+        for r in record["results"]:
+            if not r["passed"] and r.get("valid", True) and r["test_code"] not in real_bugs:
+                real_bugs[r["test_code"]] = r.get("error")
+
+    if not real_bugs:
+        return  # no model load at all when a run converges clean
+
+    try:
+        for test_code, error in real_bugs.items():
+            memory.record_bug(spec_id=spec_id, test_code=test_code, error=error, db_path=db_path)
+    except Exception as e:
+        # The pattern memory is a bonus, not the point of `breakpoint run` -
+        # a failure here (e.g. no network for the model's first download)
+        # shouldn't take down real, already-computed run results.
+        print(f"(bug-pattern memory update skipped: {e})")
 
 
 def cmd_run(args):
@@ -33,6 +57,7 @@ def cmd_run(args):
     )
 
     spec_id = storage.save_run(args.request, result["spec"], result["history"], result["report"])
+    _record_bugs_for_memory(spec_id, result["history"])
 
     report = result["report"]
     print(f"Spec ID:        {spec_id}")
