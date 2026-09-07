@@ -1,5 +1,8 @@
 # Breakpoint
 
+[![Tests](https://github.com/asim-aa/breakpoint/actions/workflows/test.yml/badge.svg)](https://github.com/asim-aa/breakpoint/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **An adversarial code-generation system where correctness is decided by real execution, not by a second LLM's opinion.**
 
 One agent (the **Prover**) implements a spec. A second agent (the **Skeptic**) — running on a *different* model, on purpose — writes tests specifically aimed at breaking that implementation. Every test actually runs, in an isolated subprocess, and the pass/fail result is a fact, not a vibe. Failures feed back to the Prover with the real traceback; the loop retries within a bounded round budget; an Arbiter produces a final verdict, a confidence score, and a persisted record of every attempt.
