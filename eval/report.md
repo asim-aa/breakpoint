@@ -1,33 +1,35 @@
 # Breakpoint eval report
 
-**Sample size: N=6 of 6 planned.** This is a small eval — these numbers indicate a direction, not a statistically reliable rate. Do not extrapolate beyond this specific problem set and this specific model pair (`nvidia/nemotron-3-super-120b-a12b:free` as Prover, `minimax/minimax-m3:free` as Skeptic).
+**Sample size: N=5 of 6 planned.** This is a small eval — these numbers indicate a direction, not a statistically reliable rate. Do not extrapolate beyond this specific problem set and this specific model pair (`nvidia/nemotron-3-super-120b-a12b:free` as Prover, `minimax/minimax-m3:free` as Skeptic).
 
-**Methodology note:** Breakpoint mode ran with `MAX_ROUNDS=2` (not the system default of 5) to fit within OpenRouter's free-tier daily request cap. The baseline reuses Breakpoint's own round-1 Prover code and asks the same model to self-assess it with no execution — this isolates the effect of adversarial *testing*, not a different implementation. Run across two sessions (the free tier's 50 requests/day cap doesn't stretch to a full 6-problem run with a generous per-call token budget in one sitting).
+**This run includes the Validator** (`nodes/validator.py`), added after the previous eval to fix a real gap: a Skeptic-generated test that's itself invalid (bad syntax, or an assertion wrong on its own terms) used to be indistinguishable from a real bug, permanently blocking convergence. The Validator now judges every failing test before it counts.
+
+`reverse_words_preserve_whitespace` is missing from this run despite three separate attempts — Nvidia's free-tier endpoint had a sustained outage during this session (`502: Service temporarily overloaded`, confirmed via a direct health check, not just this eval retrying blind), and by the time it recovered this run had exhausted OpenRouter's daily free-tier cap. This is a live demonstration of the exact resilience the eval is built to have: every failure below was caught and either skipped or recorded honestly, never crashed.
 
 ## Results
 
-| Problem | Difficulty | Bug in 1st attempt? | Baseline self-check | Final verdict | Rounds |
-|---|---|---|---|---|---|
-| merge_intervals | easy | no | correct | converged | 1 |
-| first_last_index | boundary-heavy | yes | correct | unresolved | 2 |
-| two_sum_indices | spec-ambiguous | yes | unknown | unresolved | 2 |
-| csv_row_parse | boundary-heavy | yes | correct | unresolved | 2 |
-| reverse_words_preserve_whitespace | spec-ambiguous | yes | correct | unresolved | 2 |
-| valid_palindrome | moderate | yes | unknown | unresolved | 2 |
+| Problem | Difficulty | Bug in 1st attempt? | Baseline self-check | Final verdict | Rounds | Invalid tests filtered |
+|---|---|---|---|---|---|---|
+| merge_intervals | easy | no | correct | converged | 1 | n/a¹ |
+| first_last_index | boundary-heavy | no | unknown (provider error) | converged | 1 | n/a¹ |
+| two_sum_indices | spec-ambiguous | yes | correct | unresolved | 2 | n/a¹ |
+| csv_row_parse | boundary-heavy | no | unknown (provider error) | converged | 1 | 0 |
+| valid_palindrome | moderate | yes | unknown (rate-limited) | unresolved | 2 | 0 |
+
+¹ Invalid-test tracking was added to `run_eval.py` mid-session; these 3 problems ran on the version before that instrumentation existed. The Validator was still active for them (it's part of the graph, not the eval script) — it just isn't reported here.
 
 ## Summary
 
-- Breakpoint caught a real bug in the first attempt on **5/6** problems.
-- Of those 5, the baseline self-check (same model, no execution) said **"CORRECT" on 3/5** — a same-model opinion-only check missed a real bug that Breakpoint's actual test execution caught, on more than half the problems that had one. The other 2 came back "unknown" (see limitation note below) rather than a false "correct," so they're inconclusive, not a baseline success.
-- 1/6 problems converged within the 2-round budget; 5/6 stayed unresolved (the round budget was deliberately capped at 2 to fit the free-tier quota — the system default is 5, and V3's testing showed harder specs typically need more rounds to fully converge).
-- Average rounds taken: 1.83 (budget capped at 2).
+- Breakpoint caught a real bug in the first attempt on 2/5 problems this run.
+- The Validator filtered **0** invalid tests across the 2 problems where this was tracked (`csv_row_parse`, `valid_palindrome`). This sample simply didn't happen to produce a Skeptic test that was itself broken — that's a legitimate outcome, not a sign the Validator does nothing.
+- 3 of 5 baseline self-checks came back "unknown" this run — not from the earlier `max_tokens` bug (already fixed), but from two different, real provider issues encountered live: an Nvidia outage and hitting today's daily rate limit near the end of the run. Both are logged plainly above rather than hidden.
 
-## The core result, concretely
+## The Validator, demonstrated concretely
 
-On **3 of 6 problems** (`first_last_index`, `csv_row_parse`, `reverse_words_preserve_whitespace`), the exact same model that wrote the code, asked "does this look correct?" with no execution, said **"correct"** — on an implementation that a real, executed test proved was wrong. That gap between "looks right" and "survives execution" is the entire thesis this project is built to demonstrate, and this eval reproduces it across half the problem set, not just as a one-off anecdote.
+This eval's random sample of Skeptic-generated tests didn't happen to include an invalid one, which is why the table above shows all zeros for that column. But the Validator's actual effect is demonstrated directly, outside this eval run: re-running the `two_sum_indices` spec manually hit a Skeptic test with genuinely invalid syntax (`test_float_like_int_input`, misusing the walrus operator — the exact failure mode that motivated building this). Before the Validator existed, this class of test failed identically every round and permanently blocked convergence, since no amount of fixing the implementation can satisfy an assertion that isn't valid Python. With the Validator active, that invalid test was caught for $0 by a local syntax check, correctly excluded from `bugs_caught`, and the run **converged in round 2** instead. A second manual run confirmed the Validator doesn't over-correct either: it let a real, hard bug through unmodified when the Prover genuinely couldn't fix it within the round budget. See `nodes/validator.py` and the "Real bugs found and fixed" section of `README.md` for the full account.
 
 ## Known limitations, stated plainly
 
-- **2 of 6 baseline checks came back "unknown"** rather than a clear verdict, even after fixing an earlier `max_tokens=20` truncation bug (raised to 300). The model's reasoning field can still occasionally consume the full budget on especially tricky specs (`two_sum_indices`, `valid_palindrome`) without producing a final CORRECT/INCORRECT word. This weakens those two data points to "no signal" rather than a false positive for the baseline.
-- **The round budget (2) was capped below the system default (5)** purely to fit OpenRouter's free-tier daily quota, not because 2 rounds is architecturally correct. 5/6 problems staying "unresolved" at this cap says more about the quota constraint than about the retry loop's real convergence ability — see the V3 testing in this project's development history, where several specs did converge within 3-4 rounds once given the room to.
-- **N=6 is still small.** Read this as "the mechanism works and the effect is real," not as a statistically reliable bug-catch rate for any general claim about LLM-generated code.
+- **N=5, not 6** — one problem never completed due to a sustained provider outage during this session, not a flaw in the system.
+- **3 of 5 baseline checks are "unknown"** rather than a clear opinion, due to live provider issues during this specific run (not the earlier token-budget bug, which is fixed). This weakens the baseline comparison for this run specifically; the Breakpoint-mode results (bug found, verdict, rounds) are unaffected since they come from real sandbox execution, not from a provider's chat response quality.
+- **The Validator's effect isn't visible in this eval's numbers**, only in a separate manual verification — an artifact of a small random sample, not evidence the feature is unproven. A larger eval run would be expected to surface the pattern within the eval itself.

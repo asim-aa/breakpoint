@@ -51,6 +51,18 @@ def run_breakpoint_mode(request: str) -> dict:
         config={"recursion_limit": EVAL_MAX_ROUNDS * 4 + 10},
     )
     round1 = result["history"][0] if result["history"] else None
+
+    # Track the Validator's activity across every round: how many failing
+    # tests it judged invalid (bad syntax, or an assertion wrong on its own
+    # terms) versus real bugs. This is the direct evidence for whether
+    # nodes/validator.py is doing anything in practice, not just in theory.
+    invalid_tests_seen = {
+        r["test_code"]
+        for record in result["history"]
+        for r in record["results"]
+        if not r["passed"] and not r.get("valid", True)
+    }
+
     return {
         "spec": result["spec"],
         "round1_code": round1["code"] if round1 else result["code"],
@@ -61,6 +73,7 @@ def run_breakpoint_mode(request: str) -> dict:
         "verdict": result["report"]["verdict"],
         "rounds_taken": result["report"]["rounds_taken"],
         "bugs_caught": result["report"]["bugs_caught"],
+        "invalid_tests_filtered": len(invalid_tests_seen),
     }
 
 
@@ -138,13 +151,15 @@ def main():
             "breakpoint_verdict": bp["verdict"],
             "breakpoint_rounds_taken": bp["rounds_taken"],
             "breakpoint_bugs_caught": bp["bugs_caught"],
+            "invalid_tests_filtered": bp["invalid_tests_filtered"],
             "baseline_self_check": baseline_verdict,
         }
         results.append(row)
         print(
             f"  round1_bug_found={row['breakpoint_round1_bug_found']} "
             f"baseline_self_check={row['baseline_self_check']} "
-            f"final_verdict={row['breakpoint_verdict']}",
+            f"final_verdict={row['breakpoint_verdict']} "
+            f"invalid_tests_filtered={row['invalid_tests_filtered']}",
             flush=True,
         )
 
@@ -192,16 +207,18 @@ def write_report(results: list, total_problems: int, stopped_early: bool):
 
     lines.append("## Results\n")
     lines.append(
-        "| Problem | Difficulty | Bug in 1st attempt? | Baseline self-check | Final verdict | Rounds |"
+        "| Problem | Difficulty | Bug in 1st attempt? | Baseline self-check | Final verdict | Rounds | Invalid tests filtered |"
     )
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|")
     for r in results:
         lines.append(
             f"| {r['id']} | {r['difficulty']} | "
             f"{'yes' if r['breakpoint_round1_bug_found'] else 'no'} | "
             f"{r['baseline_self_check']} | {r['breakpoint_verdict']} | "
-            f"{r['breakpoint_rounds_taken']} |"
+            f"{r['breakpoint_rounds_taken']} | {r['invalid_tests_filtered']} |"
         )
+
+    total_invalid = sum(r["invalid_tests_filtered"] for r in results)
 
     lines.append("\n## Summary\n")
     lines.append(f"- Breakpoint caught a real bug in the first attempt on **{breakpoint_caught}/{n}** problems.")
@@ -212,6 +229,12 @@ def write_report(results: list, total_problems: int, stopped_early: bool):
     )
     lines.append(f"- {converged}/{n} problems converged within the 2-round budget; {unresolved}/{n} stayed unresolved.")
     lines.append(f"- Average rounds taken: {avg_rounds:.1f} (budget capped at {EVAL_MAX_ROUNDS}).")
+    lines.append(
+        f"- The Validator (`nodes/validator.py`) filtered **{total_invalid}** distinct "
+        f"invalid test(s) across this run — Skeptic-generated tests judged not to be "
+        f"real bugs (bad syntax, or an assertion wrong on its own terms), excluded "
+        f"from `bugs_caught` and never fed back to the Prover."
+    )
 
     with open(REPORT_PATH, "w") as f:
         f.write("\n".join(lines) + "\n")
