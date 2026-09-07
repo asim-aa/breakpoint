@@ -28,11 +28,11 @@ Most "AI writes code" demos verify correctness by asking a language model whethe
                  └─────────┘   └────┬────┘   └──────────┘   └──────────┘   └─────┬─────┘
                                     ▲                                            │
                                     │             round < max_rounds             │
-                                    └────────── fix + retry ────────────────────-┤
-                                                                                  │ no real
-                                                                                  │ failures left,
-                                                                                  │ or round budget hit
-                                                                                  ▼
+                                    └────────── fix + retry ─────────────────────┤
+                                                                                 │ no real
+                                                                                 │ failures left,
+                                                                                 │ or round budget hit
+                                                                                 ▼
                                                                             ┌──────────┐
                                                                             │ Arbiter  │
                                                                             │ verdict +│
@@ -91,9 +91,7 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/               46 tests, $0 to run, no network access — sandbox correctness, plus every parsing/
-                     validation edge case in this README's bug writeups, reproduced as a real
-                     regression test rather than left as a one-off manual fix
+tests/              46 tests covering the sandbox and every pure-logic module — $0, no network access
 ```
 
 ## Quickstart
