@@ -60,6 +60,18 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
         conn.execute("ALTER TABLE tests ADD COLUMN error TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migration for DBs created before the leaderboard existed: record
+    # which model pair produced each run. NULL on old rows rather than
+    # guessed — get_leaderboard() groups those under an "unknown" pair
+    # instead of fabricating history.
+    try:
+        conn.execute("ALTER TABLE specs ADD COLUMN prover_model TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        conn.execute("ALTER TABLE specs ADD COLUMN skeptic_model TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     return conn
 
 
@@ -68,8 +80,15 @@ def save_run(request: str, spec: dict, history: list, report: dict, db_path: str
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO specs (request, spec_json, created_at) VALUES (?, ?, ?)",
-            (request, json.dumps(spec), datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO specs (request, spec_json, created_at, prover_model, skeptic_model) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (
+                request,
+                json.dumps(spec),
+                datetime.now(timezone.utc).isoformat(),
+                os.environ.get("PROVER_MODEL"),
+                os.environ.get("SKEPTIC_MODEL"),
+            ),
         )
         spec_id = cur.lastrowid
 
@@ -180,5 +199,51 @@ def get_requests_by_ids(spec_ids: list[int], db_path: str = DB_PATH) -> dict[int
             f"SELECT id, request FROM specs WHERE id IN ({placeholders})", spec_ids
         )
         return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+def get_leaderboard(db_path: str = DB_PATH) -> list[dict]:
+    """Aggregates every run by (prover_model, skeptic_model) — accumulates
+    naturally as `breakpoint run` gets used with different .env settings
+    across sessions, rather than needing a dedicated multi-pair runner
+    script that would immediately hit OpenRouter's daily quota on its own.
+
+    Runs from before this feature existed have NULL for both models —
+    grouped under their own ("unknown", "unknown") row rather than
+    guessed, since fabricating which models produced old data would be
+    worse than admitting it isn't known.
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """
+            WITH per_spec AS (
+                SELECT
+                    s.id AS spec_id,
+                    COALESCE(s.prover_model, 'unknown') AS prover_model,
+                    COALESCE(s.skeptic_model, 'unknown') AS skeptic_model,
+                    (SELECT a.verdict FROM attempts a
+                     WHERE a.spec_id = s.id ORDER BY a.round DESC LIMIT 1) AS last_verdict,
+                    (SELECT COUNT(*) FROM attempts a WHERE a.spec_id = s.id) AS rounds,
+                    (SELECT COUNT(DISTINCT t.test_code)
+                     FROM tests t JOIN attempts a ON t.attempt_id = a.id
+                     WHERE a.spec_id = s.id AND t.is_bug = 1) AS bugs_caught
+                FROM specs s
+            )
+            SELECT
+                prover_model,
+                skeptic_model,
+                COUNT(*) AS total_runs,
+                SUM(CASE WHEN last_verdict = 'round_passed' THEN 1 ELSE 0 END) AS converged,
+                SUM(bugs_caught) AS total_bugs_caught,
+                ROUND(AVG(rounds), 2) AS avg_rounds
+            FROM per_spec
+            GROUP BY prover_model, skeptic_model
+            ORDER BY total_runs DESC
+            """
+        )
+        columns = [c[0] for c in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
     finally:
         conn.close()

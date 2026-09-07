@@ -107,6 +107,37 @@ def cmd_patterns(args):
         print(line)
 
 
+def _format_leaderboard_table(rows: list[dict]) -> list[str]:
+    # 40 chars comfortably fits real OpenRouter model slugs (the longest
+    # in this project's own usage is 38 chars) without mid-word truncation.
+    header = (
+        f"{'prover model':<40}  {'skeptic model':<40}  "
+        f"{'runs':>4}  {'converged':>9}  {'bugs':>4}  {'avg rounds':>10}"
+    )
+    lines = [header, "-" * len(header)]
+    for row in rows:
+        lines.append(
+            f"{row['prover_model'][:40]:<40}  {row['skeptic_model'][:40]:<40}  "
+            f"{row['total_runs']:>4}  {row['converged']:>9}  "
+            f"{row['total_bugs_caught']:>4}  {row['avg_rounds']:>10}"
+        )
+    return lines
+
+
+def cmd_leaderboard(args):
+    rows = storage.get_leaderboard()
+    if not rows:
+        print("No runs recorded yet — run `breakpoint run` a few times first.")
+        return
+
+    for line in _format_leaderboard_table(rows):
+        print(line)
+    print(
+        "\nAccumulates across sessions as you change PROVER_MODEL/SKEPTIC_MODEL "
+        "in .env and keep using `breakpoint run` — no separate multi-pair runner needed."
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(prog="breakpoint")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -124,6 +155,11 @@ def main():
         "patterns", help="list recorded bug patterns, most frequent first"
     )
     patterns_parser.set_defaults(func=cmd_patterns)
+
+    leaderboard_parser = subparsers.add_parser(
+        "leaderboard", help="compare Prover/Skeptic model pairs across all recorded runs"
+    )
+    leaderboard_parser.set_defaults(func=cmd_leaderboard)
 
     args = parser.parse_args()
     args.func(args)

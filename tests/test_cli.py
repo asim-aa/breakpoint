@@ -109,3 +109,38 @@ def test_cmd_patterns_resolves_and_prints_table(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert "none input" in captured.out
     assert "merge intervals" in captured.out
+
+
+def test_format_leaderboard_table_includes_all_rows():
+    rows = [
+        {"prover_model": "prover-a", "skeptic_model": "skeptic-a", "total_runs": 3,
+         "converged": 2, "total_bugs_caught": 5, "avg_rounds": 1.67},
+        {"prover_model": "prover-b", "skeptic_model": "skeptic-b", "total_runs": 1,
+         "converged": 0, "total_bugs_caught": 1, "avg_rounds": 2.0},
+    ]
+    lines = cli._format_leaderboard_table(rows)
+    body = "\n".join(lines)
+    assert "prover-a" in body
+    assert "skeptic-a" in body
+    assert "prover-b" in body
+    assert "1.67" in body
+
+
+def test_cmd_leaderboard_prints_message_when_no_runs(monkeypatch, capsys):
+    monkeypatch.setattr(cli.storage, "get_leaderboard", lambda: [])
+    cli.cmd_leaderboard(args=None)
+    captured = capsys.readouterr()
+    assert "No runs recorded" in captured.out
+
+
+def test_cmd_leaderboard_prints_table_when_runs_exist(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.storage,
+        "get_leaderboard",
+        lambda: [{"prover_model": "prover-a", "skeptic_model": "skeptic-a", "total_runs": 2,
+                  "converged": 1, "total_bugs_caught": 3, "avg_rounds": 1.5}],
+    )
+    cli.cmd_leaderboard(args=None)
+    captured = capsys.readouterr()
+    assert "prover-a" in captured.out
+    assert "skeptic-a" in captured.out

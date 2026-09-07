@@ -70,6 +70,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
 | — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
 | — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | ✅ done — `breakpoint patterns` |
+| — | Multi-model leaderboard: compares Prover/Skeptic pairs by convergence rate and bugs caught | ✅ done — `breakpoint leaderboard` |
 
 ## Eval results
 
@@ -86,7 +87,7 @@ sandbox.py          Isolated subprocess execution — the ground truth for every
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
 storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
 memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
-cli.py              `breakpoint run "<request>"`, `breakpoint history`, `breakpoint patterns`
+cli.py              `breakpoint run "<request>"`, `history`, `patterns`, `leaderboard`
 manual_run.py       Ad-hoc single-request runner with a full round-by-round trace printed
 nodes/
   framer.py         Plain-English request → formal spec (JSON: inputs/output/constraints/examples)
@@ -97,7 +98,7 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/              76 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
+tests/              85 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 
 ## Quickstart
@@ -111,7 +112,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full test suite (76 tests) — no OpenRouter API key needed
+# Full test suite (85 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace
@@ -124,9 +125,15 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 # See recurring bug patterns across every run so far
 ./venv/bin/python cli.py patterns
 
+# Compare Prover/Skeptic model pairs (accumulates as you change .env
+# across sessions — see note below)
+./venv/bin/python cli.py leaderboard
+
 # The 6-problem eval
 ./venv/bin/python eval/run_eval.py
 ```
+
+The leaderboard has no dedicated "run every model pair" script on purpose: `storage.save_run` already records whichever `PROVER_MODEL`/`SKEPTIC_MODEL` pair produced each run, so switching `.env` between sessions and using `breakpoint run` as normal is enough to build it up over time — no extra API usage beyond what you'd spend anyway, which matters given how tight OpenRouter's free-tier daily cap is (see below).
 
 ### A note on OpenRouter's free tier
 

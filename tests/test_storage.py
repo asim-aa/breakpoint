@@ -210,3 +210,114 @@ def test_get_requests_by_ids_ignores_unknown_ids(db_path):
 
 def test_get_requests_by_ids_empty_list_returns_empty_dict(db_path):
     assert storage.get_requests_by_ids([], db_path=db_path) == {}
+
+
+def _history_with_bug(rounds_and_pass):
+    """Like _history() but each round's single test has a real bug (fails)
+    until the round marked True, matching what a genuine multi-round run
+    looks like for leaderboard aggregation."""
+    history = []
+    for i, passed in enumerate(rounds_and_pass, start=1):
+        history.append(
+            {
+                "round": i,
+                "code": f"def f(): return {i}",
+                "results": [{"test_code": "def test_a(): pass", "passed": passed, "valid": True}],
+                "round_passed": passed,
+            }
+        )
+    return history
+
+
+def test_save_run_records_model_pair_from_environment(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-x")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-y")
+    storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT prover_model, skeptic_model FROM specs").fetchone()
+    finally:
+        conn.close()
+    assert row == ("prover-x", "skeptic-y")
+
+
+def test_save_run_records_none_when_env_vars_unset(db_path, monkeypatch):
+    monkeypatch.delenv("PROVER_MODEL", raising=False)
+    monkeypatch.delenv("SKEPTIC_MODEL", raising=False)
+    storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute("SELECT prover_model, skeptic_model FROM specs").fetchone()
+    finally:
+        conn.close()
+    assert row == (None, None)
+
+
+def test_get_leaderboard_groups_by_model_pair(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-a")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-a")
+    storage.save_run("req1", {}, _history_with_bug([False, True]), {}, db_path=db_path)  # 2 rounds, converged
+    storage.save_run("req2", {}, _history_with_bug([True]), {}, db_path=db_path)  # 1 round, converged
+
+    monkeypatch.setenv("PROVER_MODEL", "prover-b")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-b")
+    storage.save_run("req3", {}, _history_with_bug([False, False]), {}, db_path=db_path)  # unresolved
+
+    board = storage.get_leaderboard(db_path=db_path)
+    assert len(board) == 2
+
+    by_pair = {(row["prover_model"], row["skeptic_model"]): row for row in board}
+    a = by_pair[("prover-a", "skeptic-a")]
+    assert a["total_runs"] == 2
+    assert a["converged"] == 2
+    assert a["avg_rounds"] == 1.5
+
+    b = by_pair[("prover-b", "skeptic-b")]
+    assert b["total_runs"] == 1
+    assert b["converged"] == 0
+
+
+def test_get_leaderboard_groups_legacy_null_rows_as_unknown(db_path, monkeypatch):
+    monkeypatch.delenv("PROVER_MODEL", raising=False)
+    monkeypatch.delenv("SKEPTIC_MODEL", raising=False)
+    storage.save_run("legacy req", {}, _history([True]), {}, db_path=db_path)
+
+    board = storage.get_leaderboard(db_path=db_path)
+    assert len(board) == 1
+    assert board[0]["prover_model"] == "unknown"
+    assert board[0]["skeptic_model"] == "unknown"
+
+
+def test_get_leaderboard_counts_distinct_bugs_per_pair(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-a")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-a")
+    history = [
+        {
+            "round": 1, "code": "def f(): pass", "round_passed": False,
+            "results": [
+                {"test_code": "bug1", "passed": False, "valid": True},
+                {"test_code": "bug2", "passed": False, "valid": True},
+            ],
+        }
+    ]
+    storage.save_run("req", {}, history, {}, db_path=db_path)
+
+    board = storage.get_leaderboard(db_path=db_path)
+    assert board[0]["total_bugs_caught"] == 2
+
+
+def test_get_leaderboard_orders_by_total_runs_descending(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-rare")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-rare")
+    storage.save_run("req1", {}, _history([True]), {}, db_path=db_path)
+
+    monkeypatch.setenv("PROVER_MODEL", "prover-common")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-common")
+    storage.save_run("req2", {}, _history([True]), {}, db_path=db_path)
+    storage.save_run("req3", {}, _history([True]), {}, db_path=db_path)
+
+    board = storage.get_leaderboard(db_path=db_path)
+    assert board[0]["prover_model"] == "prover-common"
+    assert board[0]["total_runs"] == 2
