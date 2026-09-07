@@ -91,8 +91,9 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/
-  test_sandbox.py   The only tests that don't touch an LLM — sandbox correctness, fully self-contained
+tests/               46 tests, $0 to run, no network access — sandbox correctness, plus every parsing/
+                     validation edge case in this README's bug writeups, reproduced as a real
+                     regression test rather than left as a one-off manual fix
 ```
 
 ## Quickstart
@@ -106,7 +107,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Sandbox's own test suite — no API key or LLM calls needed
+# Full pure-logic test suite (46 tests) — no API key or LLM calls needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace
