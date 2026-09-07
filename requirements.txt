@@ -3,3 +3,4 @@ python-dotenv
 pytest
 httpx
 sentence-transformers
+flask

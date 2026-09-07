@@ -57,7 +57,8 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | Execution | **Python `subprocess`** | The actual ground truth: runs Skeptic's tests against Prover's code with a hard timeout, stripped environment, isolated temp directory |
 | Persistence | **SQLite** | Every spec, every round's attempt, every test result — queryable, not just printed to a terminal |
 | Bug-pattern memory | **Hugging Face** (`sentence-transformers`, local) | Embeds each real bug's signature and clusters it against previously-seen patterns — runs entirely on-device, $0/call, no OpenRouter dependency |
-| Language | **Python 3.12** | Whole project, stdlib-first (`sqlite3`, `subprocess`, `argparse` — no unnecessary dependencies) |
+| Dashboard | **Flask** (local only) | Read-only web view over the same SQLite data the CLI prints — no JS framework, no build step |
+| Language | **Python 3.12** | Whole project, stdlib-first (`sqlite3`, `subprocess`, `argparse` — dependencies added only where they earn their place) |
 
 ## Status
 
@@ -72,6 +73,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | ✅ done — `breakpoint patterns` |
 | — | Multi-model leaderboard: compares Prover/Skeptic pairs by convergence rate and bugs caught | ✅ done — `breakpoint leaderboard` |
 | — | GitHub Action: verifies an existing PR's code, not just generated code | ✅ built + unit-tested (18 tests); live end-to-end run pending an OpenRouter quota reset — see below |
+| — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
 
@@ -107,6 +109,16 @@ No Prover, no retry loop — this reports findings on code a human already wrote
 
 **Honestly: built and unit-tested (18 tests, `verify.py` + `nodes/framer.py`'s `infer_spec_from_code` + `action/verify_pr.py`, every LLM call mocked), but not yet run live end-to-end** — that needs OpenRouter quota this session has been fighting for all week. The orchestration logic itself reuses `find_bugs`, `run_test`, and `validate_test` exactly as they run in the main graph, all of which *are* proven live elsewhere in this README — this mode is new wiring around already-proven parts, not unproven logic from scratch.
 
+## Web dashboard
+
+```bash
+./venv/bin/python cli.py dashboard   # http://localhost:5050
+```
+
+A small local Flask app, read-only, over the exact same SQLite data the CLI already prints — browse runs, drill into any one's full round-by-round trace (code + every test's pass/fail), bug patterns, and the model leaderboard, without a terminal full of table output. It doesn't trigger new runs; `breakpoint run` stays how you actually use the system, this is just a better way to look at what it's already recorded.
+
+Verified against this project's own real historical data (not synthetic fixtures): pointing it at the actual `breakpoint.db` from earlier development correctly rendered a real 2-round trace including the exact "hardcode-to-cheat" bug documented above (`if s == "abXba": return False`), and correctly showed the model-leaderboard and bug-pattern pages as legacy-empty for runs that predate those features — the same honest degradation the CLI itself has, not a dashboard-specific special case.
+
 ## Structure
 
 ```
@@ -116,7 +128,9 @@ sandbox.py          Isolated subprocess execution — the ground truth for every
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
 storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
 memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
-cli.py              `breakpoint run "<request>"`, `history`, `patterns`, `leaderboard`
+cli.py              `breakpoint run "<request>"`, `history`, `patterns`, `leaderboard`, `dashboard`
+dashboard.py        Local read-only Flask app over the same SQLite data the CLI prints
+templates/          Jinja2 templates for the dashboard (no JS framework, no build step)
 manual_run.py       Ad-hoc single-request runner with a full round-by-round trace printed
 nodes/
   framer.py         Plain-English request → formal spec (JSON: inputs/output/constraints/examples)
@@ -131,7 +145,7 @@ verify.py           Verifies EXISTING code (no Prover, no retry loop) — the Gi
 action.yml          Composite GitHub Action wrapping verify.py for CI use
 action/
   verify_pr.py      CLI entry point: reads a file, runs verify.py, formats + optionally posts a PR comment
-tests/              103 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
+tests/              114 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 
 ## Quickstart
@@ -145,7 +159,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full test suite (103 tests) — no OpenRouter API key needed
+# Full test suite (114 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace
@@ -161,6 +175,9 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 # Compare Prover/Skeptic model pairs (accumulates as you change .env
 # across sessions — see note below)
 ./venv/bin/python cli.py leaderboard
+
+# Browse all of the above visually instead of in a terminal
+./venv/bin/python cli.py dashboard
 
 # The 6-problem eval
 ./venv/bin/python eval/run_eval.py

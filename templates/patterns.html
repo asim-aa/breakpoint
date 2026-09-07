@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Bug Patterns — Breakpoint{% endblock %}
+{% block content %}
+  <h1>Bug Patterns</h1>
+  <p class="muted">Real bugs clustered by semantic similarity across every run — see <code>memory.py</code>.</p>
+  {% if not patterns %}
+    <p class="muted">No bug patterns recorded yet.</p>
+  {% else %}
+    <table>
+      <tr><th>Description</th><th>Frequency</th><th>Seen on</th></tr>
+      {% for p in patterns %}
+        <tr>
+          <td>{{ p.description }}</td>
+          <td>{{ p.frequency }}</td>
+          <td>
+            {% for sid in p.example_spec_ids %}
+              <a href="/runs/{{ sid }}">{{ requests.get(sid, "spec #" + sid|string) }}</a>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Run #{{ detail.id }} — Breakpoint{% endblock %}
+{% block content %}
+  <p><a href="/">&larr; all runs</a></p>
+  <h1>#{{ detail.id }}: {{ detail.request }}</h1>
+  <p class="muted">
+    {{ detail.created_at }}
+    {% if detail.prover_model %} &middot; Prover: {{ detail.prover_model }}{% endif %}
+    {% if detail.skeptic_model %} &middot; Skeptic: {{ detail.skeptic_model }}{% endif %}
+  </p>
+
+  <details>
+    <summary>Spec</summary>
+    <pre>{{ spec_pretty }}</pre>
+  </details>
+
+  {% for attempt in detail.attempts %}
+    <div class="round">
+      <h3>Round {{ attempt.round }} — <span class="verdict-{{ attempt.verdict }}">{{ attempt.verdict }}</span></h3>
+      <pre>{{ attempt.code }}</pre>
+      <table>
+        <tr><th>Test</th><th>Result</th></tr>
+        {% for t in attempt.tests %}
+          <tr>
+            <td><code>{{ t.test_code.splitlines()[0] if t.test_code else "" }}</code></td>
+            <td class="{{ 'pass' if t.passed else 'fail' }}">
+              {{ "PASS" if t.passed else ("BUG" if t.is_bug else "FAIL (invalid)") }}
+              {% if not t.passed and t.error %}
+                <div class="muted">{{ t.error.strip().splitlines()[-1] if t.error else "" }}</div>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  {% endfor %}
+{% endblock %}

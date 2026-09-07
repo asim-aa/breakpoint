@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Runs — Breakpoint{% endblock %}
+{% block content %}
+  <h1>Runs</h1>
+  {% if not rows %}
+    <p class="muted">No runs recorded yet — run <code>breakpoint run "&lt;request&gt;"</code> first.</p>
+  {% else %}
+    <table>
+      <tr><th>ID</th><th>Request</th><th>Verdict</th><th>Rounds</th><th>Bugs</th></tr>
+      {% for row in rows %}
+        <tr>
+          <td><a href="/runs/{{ row.id }}">#{{ row.id }}</a></td>
+          <td>{{ row.request }}</td>
+          <td class="verdict-{{ row.last_verdict }}">{{ row.last_verdict }}</td>
+          <td>{{ row.rounds }}</td>
+          <td>{{ row.bugs_caught }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+{% endblock %}

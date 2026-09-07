@@ -247,3 +247,46 @@ def get_leaderboard(db_path: str = DB_PATH) -> list[dict]:
         return [dict(zip(columns, row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
+
+def get_run_detail(spec_id: int, db_path: str = DB_PATH) -> dict | None:
+    """Everything about one run: the spec, and every round's code and test
+    results — the full trace, for the dashboard's per-run detail view.
+    Returns None if spec_id doesn't exist."""
+    conn = get_connection(db_path)
+    try:
+        spec_row = conn.execute(
+            "SELECT request, spec_json, created_at, prover_model, skeptic_model "
+            "FROM specs WHERE id = ?",
+            (spec_id,),
+        ).fetchone()
+        if spec_row is None:
+            return None
+
+        request, spec_json, created_at, prover_model, skeptic_model = spec_row
+
+        attempts = []
+        for attempt_id, round_num, code, verdict in conn.execute(
+            "SELECT id, round, code, verdict FROM attempts WHERE spec_id = ? ORDER BY round",
+            (spec_id,),
+        ):
+            tests = [
+                {"test_code": test_code, "passed": bool(passed), "is_bug": bool(is_bug), "error": error}
+                for test_code, passed, is_bug, error in conn.execute(
+                    "SELECT test_code, passed, is_bug, error FROM tests WHERE attempt_id = ?",
+                    (attempt_id,),
+                )
+            ]
+            attempts.append({"round": round_num, "code": code, "verdict": verdict, "tests": tests})
+
+        return {
+            "id": spec_id,
+            "request": request,
+            "spec_json": spec_json,
+            "created_at": created_at,
+            "prover_model": prover_model,
+            "skeptic_model": skeptic_model,
+            "attempts": attempts,
+        }
+    finally:
+        conn.close()

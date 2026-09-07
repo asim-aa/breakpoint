@@ -321,3 +321,41 @@ def test_get_leaderboard_orders_by_total_runs_descending(db_path, monkeypatch):
     board = storage.get_leaderboard(db_path=db_path)
     assert board[0]["prover_model"] == "prover-common"
     assert board[0]["total_runs"] == 2
+
+
+def test_get_run_detail_returns_none_for_unknown_spec(db_path):
+    assert storage.get_run_detail(9999, db_path=db_path) is None
+
+
+def test_get_run_detail_returns_full_trace(db_path):
+    history = [
+        {
+            "round": 1, "code": "def f(): return None", "round_passed": False,
+            "results": [{"test_code": "def test_a(): pass", "passed": False, "valid": True, "error": "boom"}],
+        },
+        {
+            "round": 2, "code": "def f(): return []", "round_passed": True,
+            "results": [{"test_code": "def test_a(): pass", "passed": True, "valid": True, "error": None}],
+        },
+    ]
+    spec_id = storage.save_run("merge intervals", {"function_name": "f"}, history, {}, db_path=db_path)
+
+    detail = storage.get_run_detail(spec_id, db_path=db_path)
+    assert detail["request"] == "merge intervals"
+    assert detail["id"] == spec_id
+    assert len(detail["attempts"]) == 2
+    assert detail["attempts"][0]["round"] == 1
+    assert detail["attempts"][0]["code"] == "def f(): return None"
+    assert detail["attempts"][0]["tests"][0]["passed"] is False
+    assert detail["attempts"][0]["tests"][0]["error"] == "boom"
+    assert detail["attempts"][1]["verdict"] == "round_passed"
+
+
+def test_get_run_detail_includes_model_pair(db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-x")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-y")
+    spec_id = storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
+
+    detail = storage.get_run_detail(spec_id, db_path=db_path)
+    assert detail["prover_model"] == "prover-x"
+    assert detail["skeptic_model"] == "skeptic-y"

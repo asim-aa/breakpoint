@@ -138,6 +138,14 @@ def cmd_leaderboard(args):
     )
 
 
+def cmd_dashboard(args):
+    # Imported here, not at module load: every other command works even if
+    # Flask somehow isn't installed, since only this one needs it.
+    from dashboard import create_app
+
+    create_app().run(debug=False, port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="breakpoint")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -160,6 +168,12 @@ def main():
         "leaderboard", help="compare Prover/Skeptic model pairs across all recorded runs"
     )
     leaderboard_parser.set_defaults(func=cmd_leaderboard)
+
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="start a local web dashboard over runs/patterns/leaderboard"
+    )
+    dashboard_parser.add_argument("--port", type=int, default=5050)
+    dashboard_parser.set_defaults(func=cmd_dashboard)
 
     args = parser.parse_args()
     args.func(args)
