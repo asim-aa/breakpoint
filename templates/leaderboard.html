@@ -14,7 +14,12 @@
           <td>{{ row.skeptic_model }}</td>
           <td>{{ row.total_runs }}</td>
           <td>{{ row.converged }}</td>
-          <td>{{ row.total_bugs_caught }}</td>
+          <td>
+            <div class="bar-cell">
+              <span class="bar-value">{{ row.total_bugs_caught }}</span>
+              <div class="bar-track"><div class="bar-fill" style="width: {{ row.bar_pct }}%"></div></div>
+            </div>
+          </td>
           <td>{{ row.avg_rounds }}</td>
         </tr>
       {% endfor %}

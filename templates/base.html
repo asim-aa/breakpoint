@@ -33,6 +33,11 @@
     .verdict-unresolved, .verdict-bugs_found { color: #c0392b; }
     .muted { opacity: 0.65; font-size: 0.9em; }
     .round { margin: 20px 0; padding: 12px 16px; border: 1px solid #8884; border-radius: 8px; }
+    .bar-cell { display: flex; align-items: center; gap: 8px; min-width: 160px; }
+    .bar-track { flex: 1; background: #8882; border-radius: 4px; height: 10px; overflow: hidden; }
+    .bar-fill { background: #c0392b; height: 100%; border-radius: 4px; }
+    .bar-fill.pattern { background: #6a5acd; }
+    .bar-value { min-width: 1.5em; text-align: right; font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>

@@ -11,7 +11,12 @@
       {% for p in patterns %}
         <tr>
           <td>{{ p.description }}</td>
-          <td>{{ p.frequency }}</td>
+          <td>
+            <div class="bar-cell">
+              <span class="bar-value">{{ p.frequency }}</span>
+              <div class="bar-track"><div class="bar-fill pattern" style="width: {{ p.bar_pct }}%"></div></div>
+            </div>
+          </td>
           <td>
             {% for sid in p.example_spec_ids %}
               <a href="/runs/{{ sid }}">{{ requests.get(sid, "spec #" + sid|string) }}</a>{% if not loop.last %}, {% endif %}

@@ -120,3 +120,44 @@ def test_leaderboard_page_shows_model_pair(client, db_path, monkeypatch):
     assert response.status_code == 200
     assert b"prover-x" in response.data
     assert b"skeptic-y" in response.data
+
+
+def test_with_bar_widths_scales_relative_to_max():
+    from dashboard import _with_bar_widths
+
+    rows = [{"id": 1, "frequency": 4}, {"id": 2, "frequency": 2}, {"id": 3, "frequency": 1}]
+    result = _with_bar_widths(rows, "frequency")
+
+    assert result[0]["bar_pct"] == 100.0
+    assert result[1]["bar_pct"] == 50.0
+    assert result[2]["bar_pct"] == 25.0
+
+
+def test_with_bar_widths_handles_empty_list():
+    from dashboard import _with_bar_widths
+
+    assert _with_bar_widths([], "frequency") == []
+
+
+def test_with_bar_widths_handles_all_zero_values_without_crashing():
+    from dashboard import _with_bar_widths
+
+    rows = [{"id": 1, "frequency": 0}, {"id": 2, "frequency": 0}]
+    result = _with_bar_widths(rows, "frequency")
+    assert result[0]["bar_pct"] == 0.0
+    assert result[1]["bar_pct"] == 0.0
+
+
+def test_leaderboard_page_renders_bar_chart_widths(client, db_path, monkeypatch):
+    monkeypatch.setenv("PROVER_MODEL", "prover-a")
+    monkeypatch.setenv("SKEPTIC_MODEL", "skeptic-a")
+    history = [
+        {"round": 1, "code": "def f(): pass", "round_passed": False,
+         "results": [{"test_code": "bug1", "passed": False, "valid": True, "error": "e"},
+                     {"test_code": "bug2", "passed": False, "valid": True, "error": "e"}]},
+    ]
+    storage.save_run("req", {}, history, {}, db_path=db_path)
+
+    response = client.get("/leaderboard")
+    assert response.status_code == 200
+    assert b"width: 100.0%" in response.data
