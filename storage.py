@@ -31,6 +31,16 @@ CREATE TABLE IF NOT EXISTS tests (
     passed INTEGER NOT NULL,
     is_bug INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS bug_patterns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    description TEXT NOT NULL,
+    representative_test TEXT NOT NULL,
+    centroid BLOB NOT NULL,
+    frequency INTEGER NOT NULL DEFAULT 1,
+    example_spec_ids TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -42,6 +52,12 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     # since that was the only behavior available at the time).
     try:
         conn.execute("ALTER TABLE tests ADD COLUMN is_valid INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migration for DBs created before bug-pattern memory existed: add
+    # error, needed to build a bug's signature text for embedding.
+    try:
+        conn.execute("ALTER TABLE tests ADD COLUMN error TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
     return conn
@@ -68,8 +84,8 @@ def save_run(request: str, spec: dict, history: list, report: dict, db_path: str
             for result in record["results"]:
                 valid = result.get("valid", True)
                 cur.execute(
-                    "INSERT INTO tests (attempt_id, test_code, passed, is_bug, is_valid) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "INSERT INTO tests (attempt_id, test_code, passed, is_bug, is_valid, error) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
                     (
                         attempt_id,
                         result["test_code"],
@@ -78,6 +94,7 @@ def save_run(request: str, spec: dict, history: list, report: dict, db_path: str
                         # legitimate test, not just any raw failure.
                         int((not result["passed"]) and valid),
                         int(valid),
+                        result.get("error"),
                     ),
                 )
 
@@ -108,6 +125,42 @@ def list_history(limit: int = 20, db_path: str = DB_PATH) -> list[dict]:
             LIMIT ?
             """,
             (limit,),
+        )
+        columns = [c[0] for c in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def get_all_bugs(db_path: str = DB_PATH) -> list[dict]:
+    """Every real bug ever caught, one row per distinct (spec, test) pair.
+
+    Deliberately deduped within a spec (a bug that failed identically
+    across several retry rounds is the SAME bug being caught once, not
+    several) but NOT deduped across specs — the same kind of bug
+    resurfacing on a different spec is exactly the recurrence
+    nodes/memory.py's clustering is meant to surface.
+
+    `error` isn't part of the grouping key: the sandbox embeds a random
+    temp-dir path in every traceback, so the same test's error text can
+    differ slightly across rounds even though it's the same bug. GROUP BY
+    on (spec_id, test_code) with a bare `error` column is valid SQLite —
+    it resolves to one representative row's value from the group, which
+    is all a bug signature needs.
+    """
+    conn = get_connection(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT a.spec_id AS spec_id, s.request AS request,
+                   t.test_code AS test_code, t.error AS error
+            FROM tests t
+            JOIN attempts a ON t.attempt_id = a.id
+            JOIN specs s ON a.spec_id = s.id
+            WHERE t.is_bug = 1
+            GROUP BY a.spec_id, t.test_code
+            """
         )
         columns = [c[0] for c in cur.description]
         return [dict(zip(columns, row)) for row in cur.fetchall()]

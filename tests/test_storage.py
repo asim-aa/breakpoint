@@ -114,8 +114,81 @@ def test_list_history_respects_limit(db_path):
 
 def test_get_connection_is_idempotent_and_migration_safe(db_path):
     # Calling get_connection twice (as save_run + list_history each do)
-    # must not fail on "column already exists" from the is_valid migration.
+    # must not fail on "column already exists" from the is_valid or error
+    # migrations.
     conn1 = storage.get_connection(db_path)
     conn1.close()
     conn2 = storage.get_connection(db_path)
     conn2.close()
+
+
+def test_save_run_persists_error_message(db_path):
+    history = [
+        {
+            "round": 1,
+            "code": "def f(): pass",
+            "round_passed": False,
+            "results": [
+                {"test_code": "def test_a(): pass", "passed": False, "valid": True, "error": "AssertionError: boom"}
+            ],
+        }
+    ]
+    storage.save_run("req", {}, history, {}, db_path=db_path)
+
+    conn = sqlite3.connect(db_path)
+    try:
+        error = conn.execute("SELECT error FROM tests").fetchone()[0]
+    finally:
+        conn.close()
+    assert error == "AssertionError: boom"
+
+
+def test_get_all_bugs_excludes_passing_and_invalid_tests(db_path):
+    history = [
+        {
+            "round": 1,
+            "code": "def f(): pass",
+            "round_passed": False,
+            "results": [
+                {"test_code": "real_bug", "passed": False, "valid": True, "error": "e1"},
+                {"test_code": "invalid_test", "passed": False, "valid": False, "error": "e2"},
+                {"test_code": "passing_test", "passed": True, "valid": True, "error": None},
+            ],
+        }
+    ]
+    storage.save_run("req", {}, history, {}, db_path=db_path)
+
+    bugs = storage.get_all_bugs(db_path=db_path)
+    assert len(bugs) == 1
+    assert bugs[0]["test_code"] == "real_bug"
+    assert bugs[0]["error"] == "e1"
+    assert bugs[0]["request"] == "req"
+
+
+def test_get_all_bugs_dedupes_within_a_spec_but_not_across_specs(db_path):
+    # Same test_code failing in rounds 1 and 2 of ONE run -> counted once.
+    repeated_within_run = [
+        {"round": 1, "code": "def f(): pass", "round_passed": False,
+         "results": [{"test_code": "same_bug", "passed": False, "valid": True, "error": "e"}]},
+        {"round": 2, "code": "def f(): pass", "round_passed": False,
+         "results": [{"test_code": "same_bug", "passed": False, "valid": True, "error": "e (different tmp path)"}]},
+    ]
+    storage.save_run("spec A", {}, repeated_within_run, {}, db_path=db_path)
+
+    # An identical-looking bug on a SEPARATE spec -> counted again, since
+    # that's a genuine recurrence for the clustering system to notice.
+    storage.save_run(
+        "spec B", {},
+        [{"round": 1, "code": "def g(): pass", "round_passed": False,
+          "results": [{"test_code": "same_bug", "passed": False, "valid": True, "error": "e"}]}],
+        {}, db_path=db_path,
+    )
+
+    bugs = storage.get_all_bugs(db_path=db_path)
+    assert len(bugs) == 2
+    assert {b["request"] for b in bugs} == {"spec A", "spec B"}
+
+
+def test_get_all_bugs_empty_when_no_bugs_exist(db_path):
+    storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
+    assert storage.get_all_bugs(db_path=db_path) == []
