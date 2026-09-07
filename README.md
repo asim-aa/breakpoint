@@ -53,6 +53,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | Model access | **OpenRouter** | Prover and Skeptic pinned to *different* models — the adversarial pressure comes from genuinely different blind spots, not prompt framing |
 | Execution | **Python `subprocess`** | The actual ground truth: runs Skeptic's tests against Prover's code with a hard timeout, stripped environment, isolated temp directory |
 | Persistence | **SQLite** | Every spec, every round's attempt, every test result — queryable, not just printed to a terminal |
+| Bug-pattern memory | **Hugging Face** (`sentence-transformers`, local) | Embeds each real bug's signature and clusters it against previously-seen patterns — runs entirely on-device, $0/call, no OpenRouter dependency |
 | Language | **Python 3.12** | Whole project, stdlib-first (`sqlite3`, `subprocess`, `argparse` — no unnecessary dependencies) |
 
 ## Status
@@ -65,6 +66,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | V4a | Arbiter (verdict / confidence / coverage) + SQLite persistence + CLI | ✅ done |
 | V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
 | — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
+| — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | 🚧 embedding + clustering core done (`memory.py`); not yet wired into `cli.py` or queryable |
 
 ## Eval results
 
@@ -79,7 +81,8 @@ graph.py            LangGraph wiring: framer → prover → skeptic → sandbox 
 state.py            Shared LangGraph state schema (BreakpointState)
 sandbox.py          Isolated subprocess execution — the ground truth for every verdict
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
-storage.py          SQLite persistence: specs / attempts / tests tables
+storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
+memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
 cli.py              `breakpoint run "<request>"` and `breakpoint history`
 manual_run.py       Ad-hoc single-request runner with a full round-by-round trace printed
 nodes/
@@ -91,7 +94,7 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/              46 tests covering the sandbox and every pure-logic module — $0, no network access
+tests/              65 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 
 ## Quickstart
@@ -105,7 +108,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full pure-logic test suite (46 tests) — no API key or LLM calls needed
+# Full test suite (65 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace

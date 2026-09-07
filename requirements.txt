@@ -2,3 +2,4 @@ langgraph
 python-dotenv
 pytest
 httpx
+sentence-transformers
