@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS tests (
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
+    # Migration for DBs created before the Validator existed: add is_valid,
+    # defaulting existing rows to 1 (treat pre-validator failures as valid,
+    # since that was the only behavior available at the time).
+    try:
+        conn.execute("ALTER TABLE tests ADD COLUMN is_valid INTEGER NOT NULL DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     return conn
 
 
@@ -59,13 +66,18 @@ def save_run(request: str, spec: dict, history: list, report: dict, db_path: str
             attempt_id = cur.lastrowid
 
             for result in record["results"]:
+                valid = result.get("valid", True)
                 cur.execute(
-                    "INSERT INTO tests (attempt_id, test_code, passed, is_bug) VALUES (?, ?, ?, ?)",
+                    "INSERT INTO tests (attempt_id, test_code, passed, is_bug, is_valid) "
+                    "VALUES (?, ?, ?, ?, ?)",
                     (
                         attempt_id,
                         result["test_code"],
                         int(result["passed"]),
-                        int(not result["passed"]),
+                        # is_bug means "real bug": failed AND judged a
+                        # legitimate test, not just any raw failure.
+                        int((not result["passed"]) and valid),
+                        int(valid),
                     ),
                 )
 

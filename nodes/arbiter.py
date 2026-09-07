@@ -6,14 +6,16 @@ def arbitrate(state: dict) -> dict:
     rounds_taken = len(history)
     total_tests_run = sum(len(r["results"]) for r in history)
 
-    # A "bug caught" is a distinct test that failed at least once across the
-    # whole run (deduped by source text) — the Prover was genuinely wrong
-    # about something at some point, whether or not it later got fixed.
+    # A "bug caught" is a distinct test that failed at least once AND was
+    # judged a legitimate test (not an invalid one — see nodes/validator.py)
+    # across the whole run, deduped by source text. Falls back to counting
+    # every failure as valid (r.get("valid", True)) for state produced
+    # before the validator existed.
     failed_test_codes = {
         r["test_code"]
         for record in history
         for r in record["results"]
-        if not r["passed"]
+        if not r["passed"] and r.get("valid", True)
     }
     bugs_caught = len(failed_test_codes)
 
@@ -32,9 +34,11 @@ def arbitrate(state: dict) -> dict:
     else:
         last_round = history[-1] if history else None
         if last_round and last_round["results"]:
-            passed_frac = sum(1 for r in last_round["results"] if r["passed"]) / len(
-                last_round["results"]
-            )
+            # A test that failed but was judged invalid doesn't count
+            # against confidence — it isn't evidence the Prover is wrong.
+            passed_frac = sum(
+                1 for r in last_round["results"] if r["passed"] or not r.get("valid", True)
+            ) / len(last_round["results"])
         else:
             passed_frac = 0.0
         confidence = 0.3 * passed_frac

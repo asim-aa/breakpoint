@@ -27,6 +27,7 @@ def run(request: str, max_rounds: int = DEFAULT_MAX_ROUNDS):
             "prior_failure": None,
             "verdict": None,
             "history": [],
+            "report": None,
         },
         config={"recursion_limit": max_rounds * 4 + 10},
     )
@@ -37,11 +38,18 @@ def run(request: str, max_rounds: int = DEFAULT_MAX_ROUNDS):
         print(f"--- Round {record['round']} ---")
         print(f"New tests generated this round: {len(record['new_tests'])}")
         for r in record["results"]:
-            status = "PASS" if r["passed"] else "FAIL"
             first_line = r["test_code"].splitlines()[0] if r["test_code"] else ""
-            print(f"  [{status}] {first_line}")
-            if not r["passed"]:
+            if r["passed"]:
+                print(f"  [PASS] {first_line}")
+            elif r.get("valid", True):
+                print(f"  [FAIL] {first_line}")
                 print(f"         error: {r['error']}")
+            else:
+                # A failure that doesn't count against the Prover: the
+                # Validator judged the test itself invalid (bad syntax, or
+                # an assertion that's wrong on its own terms).
+                print(f"  [FAIL-INVALID] {first_line}")
+                print(f"         invalid because: {r.get('validation_reason', '')}")
         print()
 
     print("--- Final code ---")

@@ -22,27 +22,28 @@ Most "AI writes code" demos verify correctness by asking a language model whethe
 ## Architecture
 
 ```
-                 ┌─────────┐      ┌─────────┐      ┌──────────┐      ┌──────────┐
-  request  ───▶  │ Framer  │ ───▶ │ Prover  │ ───▶ │ Skeptic  │ ───▶ │ Sandbox  │
-                 │ → spec  │      │ → code  │      │ → tests  │      │ real exec│
-                 └─────────┘      └─────────┘      └──────────┘      └────┬─────┘
-                                        ▲                                 │
-                                        │        round < max_rounds       │
-                                        └─────── fix + retry ─────────────┤
-                                                                          │ all pass, or
-                                                                          │ round budget hit
-                                                                          ▼
-                                                                    ┌──────────┐
-                                                                    │ Arbiter  │
-                                                                    │ verdict +│
-                                                                    │confidence│
-                                                                    └────┬─────┘
-                                                                         ▼
-                                                                  SQLite (specs /
-                                                                  attempts / tests)
+                 ┌─────────┐   ┌─────────┐   ┌──────────┐   ┌──────────┐   ┌───────────┐
+  request  ───▶  │ Framer  │──▶│ Prover  │──▶│ Skeptic  │──▶│ Sandbox  │──▶│ Validator │
+                 │ → spec  │   │ → code  │   │ → tests  │   │ real exec│   │ real bug? │
+                 └─────────┘   └────┬────┘   └──────────┘   └──────────┘   └─────┬─────┘
+                                    ▲                                            │
+                                    │             round < max_rounds             │
+                                    └────────── fix + retry ────────────────────-┤
+                                                                                  │ no real
+                                                                                  │ failures left,
+                                                                                  │ or round budget hit
+                                                                                  ▼
+                                                                            ┌──────────┐
+                                                                            │ Arbiter  │
+                                                                            │ verdict +│
+                                                                            │confidence│
+                                                                            └────┬─────┘
+                                                                                 ▼
+                                                                          SQLite (specs /
+                                                                          attempts / tests)
 ```
 
-Built as a LangGraph `StateGraph` with one conditional edge — the retry loop is the thing that makes this a *system* rather than a linear pipeline. Every round re-runs **every** previously-generated test, not just the newest ones, so a fix can't silently reintroduce a bug that was already caught.
+Built as a LangGraph `StateGraph` with one conditional edge — the retry loop is the thing that makes this a *system* rather than a linear pipeline. Every round re-runs **every** previously-generated test, not just the newest ones, so a fix can't silently reintroduce a bug that was already caught. The Validator exists because a failing test isn't automatically a real bug — see "Real bugs found and fixed" below for the failure mode that motivated it.
 
 ## Tech stack
 
@@ -63,6 +64,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | V3 | Retry loop, bounded by a round budget | ✅ done |
 | V4a | Arbiter (verdict / confidence / coverage) + SQLite persistence + CLI | ✅ done |
 | V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
+| — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
 
 ## Eval results
 
@@ -82,6 +84,7 @@ nodes/
   framer.py         Plain-English request → formal spec (JSON: inputs/output/constraints/examples)
   prover.py         Spec (+ optional failure trace) → implementation
   skeptic.py        Spec + code → adversarial pytest-style tests, on a different model than the Prover
+  validator.py      Judges whether a failing test is a real bug or an invalid test (bad syntax, or an assertion that's wrong on its own terms) — a free local syntax check first, an LLM call only if that passes
   arbiter.py        Final verdict + confidence heuristic (formula documented in-code, not pretended to be rigorous)
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
@@ -127,7 +130,7 @@ Documented here rather than glossed over — debugging an adversarial LLM pipeli
 - **Reasoning-model leakage into code output.** Some free-tier models embed unterminated reasoning prose directly inside their returned code block, producing a `SyntaxError` that looks identical across every test run against it — easy to misread as "the code is universally broken" rather than "the extraction let garbage through." `prover.py` now validates with `compile()` and retries, and falls back to returning the best attempt (rather than raising and crashing the whole graph) if every retry still fails to compile — the round-level retry loop gets a chance to recover instead of one node's exhausted internal retries taking the whole run down.
 - **Multi-test contamination from the Skeptic.** Despite explicit instructions to write one self-contained test function per JSON array entry, the Skeptic sometimes bundles several `def test_...` functions into a single entry. Since the sandbox harness auto-discovers every `test_*` function in a combined run, this silently mixed pass/fail results and misattributed which test actually failed — caught directly from a live trace where a result labeled `test_empty_list` had a traceback pointing at a completely different function, `test_negative_numbers`, bundled into the same string. Fixed by splitting any multi-def blob into separate entries before they ever reach the sandbox.
 - **Over-escaped JSON newlines.** Models occasionally emit `\\n` instead of `\n` inside JSON string values containing multi-line test code, producing literal backslash-n characters instead of real line breaks — syntactically invalid Python that fails identically on every test. (A useful tell, learned the hard way: if *all* tests fail identically, including trivial ones like an empty-input check, suspect a pipeline defect before assuming a real bug.) Detected and unescaped defensively in `skeptic.py`.
-- **A live "hardcode-to-cheat" pattern.** On one run, the Skeptic generated a syntactically invalid test (misusing the walrus operator inside an `assert`) alongside a mathematically wrong assertion. Rather than recognizing these as bad tests, the Prover responded by literally special-casing the exact failing input (`if nums == [10**9, -10**9, 5] and target == 5: return [0, 2]`) instead of fixing the general algorithm — a real, reproducible failure pattern in how a weaker model responds to bad feedback, and exactly the kind of thing this project's bug-pattern-tracking premise exists to surface. This also exposed a real scope gap: an invalid Skeptic test can permanently block convergence, which is why a production version of this system would need the Arbiter to validate a failing test against the spec's actual contract before counting it as a real bug — not implemented here, since V4 as scoped only asks the Arbiter for a verdict/confidence report. Worth doing before trusting `bugs_caught` counts at face value.
+- **A live "hardcode-to-cheat" pattern, and the fix it motivated.** On one run, the Skeptic generated a syntactically invalid test (misusing the walrus operator inside an `assert`) alongside a mathematically wrong assertion. Rather than recognizing these as bad tests, the Prover responded by literally special-casing the exact failing input (`if nums == [10**9, -10**9, 5] and target == 5: return [0, 2]`) instead of fixing the general algorithm. Worse, the invalid test itself failed identically every round with no way for the Prover to ever satisfy it, permanently blocking convergence. Fixed with a dedicated **Validator** node (`nodes/validator.py`), inserted between Sandbox and the retry decision: a free, local `compile()` check first catches syntactically broken tests (like the walrus-operator misuse) for $0, and anything that compiles but might still be semantically wrong (e.g. an assertion that contradicts the spec) gets one LLM call judging test validity against the spec's actual contract — completely separate from judging the implementation. A test judged invalid doesn't count toward `bugs_caught`, doesn't get fed back to the Prover as `prior_failure`, and doesn't block the round from converging. Verified live: a real run against a `two_sum` spec hit a Skeptic test with genuinely invalid syntax (`test_float_like_int_input`), the Validator caught it for free, and the run converged in round 2 instead of retrying forever against an unfixable assertion.
 
 ## Security notes
 
