@@ -192,3 +192,21 @@ def test_get_all_bugs_dedupes_within_a_spec_but_not_across_specs(db_path):
 def test_get_all_bugs_empty_when_no_bugs_exist(db_path):
     storage.save_run("req", {}, _history([True]), {}, db_path=db_path)
     assert storage.get_all_bugs(db_path=db_path) == []
+
+
+def test_get_requests_by_ids_returns_matching_map(db_path):
+    id1 = storage.save_run("merge intervals", {}, _history([True]), {}, db_path=db_path)
+    id2 = storage.save_run("two sum indices", {}, _history([True]), {}, db_path=db_path)
+
+    result = storage.get_requests_by_ids([id1, id2], db_path=db_path)
+    assert result == {id1: "merge intervals", id2: "two sum indices"}
+
+
+def test_get_requests_by_ids_ignores_unknown_ids(db_path):
+    id1 = storage.save_run("merge intervals", {}, _history([True]), {}, db_path=db_path)
+    result = storage.get_requests_by_ids([id1, 9999], db_path=db_path)
+    assert result == {id1: "merge intervals"}
+
+
+def test_get_requests_by_ids_empty_list_returns_empty_dict(db_path):
+    assert storage.get_requests_by_ids([], db_path=db_path) == {}

@@ -67,3 +67,45 @@ def test_record_bugs_for_memory_survives_a_memory_failure(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert "skipped" in captured.out
+
+
+def test_format_patterns_table_includes_resolved_request_names():
+    patterns = [
+        {"id": 1, "description": "none input", "frequency": 3, "example_spec_ids": [1, 2]},
+    ]
+    requests = {1: "merge intervals", 2: "two sum indices"}
+
+    lines = cli._format_patterns_table(patterns, requests)
+
+    body = "\n".join(lines)
+    assert "none input" in body
+    assert "merge intervals" in body
+    assert "two sum indices" in body
+    assert "   3" in body  # frequency right-aligned
+
+
+def test_format_patterns_table_falls_back_to_spec_id_when_request_unknown():
+    patterns = [{"id": 1, "description": "x", "frequency": 1, "example_spec_ids": [99]}]
+    lines = cli._format_patterns_table(patterns, requests={})
+    assert "spec#99" in "\n".join(lines)
+
+
+def test_cmd_patterns_prints_message_when_no_patterns(monkeypatch, capsys):
+    monkeypatch.setattr(cli.memory, "list_patterns", lambda: [])
+    cli.cmd_patterns(args=None)
+    captured = capsys.readouterr()
+    assert "No bug patterns recorded" in captured.out
+
+
+def test_cmd_patterns_resolves_and_prints_table(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.memory,
+        "list_patterns",
+        lambda: [{"id": 1, "description": "none input", "frequency": 2, "example_spec_ids": [5]}],
+    )
+    monkeypatch.setattr(cli.storage, "get_requests_by_ids", lambda ids: {5: "merge intervals"})
+
+    cli.cmd_patterns(args=None)
+    captured = capsys.readouterr()
+    assert "none input" in captured.out
+    assert "merge intervals" in captured.out

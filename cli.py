@@ -83,6 +83,30 @@ def cmd_history(args):
         )
 
 
+def _format_patterns_table(patterns: list[dict], requests: dict[int, str]) -> list[str]:
+    header = f"{'id':>4}  {'freq':>4}  {'description':<28}  examples"
+    lines = [header, "-" * len(header)]
+    for p in patterns:
+        example_names = ", ".join(
+            requests.get(sid, f"spec#{sid}")[:32] for sid in p["example_spec_ids"]
+        )
+        lines.append(f"{p['id']:>4}  {p['frequency']:>4}  {p['description']:<28}  {example_names}")
+    return lines
+
+
+def cmd_patterns(args):
+    patterns = memory.list_patterns()
+    if not patterns:
+        print("No bug patterns recorded yet — run `breakpoint run` on a few specs first.")
+        return
+
+    all_spec_ids = sorted({sid for p in patterns for sid in p["example_spec_ids"]})
+    requests = storage.get_requests_by_ids(all_spec_ids)
+
+    for line in _format_patterns_table(patterns, requests):
+        print(line)
+
+
 def main():
     parser = argparse.ArgumentParser(prog="breakpoint")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -95,6 +119,11 @@ def main():
     history_parser = subparsers.add_parser("history", help="list past runs")
     history_parser.add_argument("--limit", type=int, default=20)
     history_parser.set_defaults(func=cmd_history)
+
+    patterns_parser = subparsers.add_parser(
+        "patterns", help="list recorded bug patterns, most frequent first"
+    )
+    patterns_parser.set_defaults(func=cmd_patterns)
 
     args = parser.parse_args()
     args.func(args)

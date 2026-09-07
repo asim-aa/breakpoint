@@ -166,3 +166,19 @@ def get_all_bugs(db_path: str = DB_PATH) -> list[dict]:
         return [dict(zip(columns, row)) for row in cur.fetchall()]
     finally:
         conn.close()
+
+
+def get_requests_by_ids(spec_ids: list[int], db_path: str = DB_PATH) -> dict[int, str]:
+    """Maps spec_id -> request text, for display purposes (e.g. showing
+    which specs a bug pattern's examples actually came from)."""
+    if not spec_ids:
+        return {}
+    conn = get_connection(db_path)
+    try:
+        placeholders = ",".join("?" for _ in spec_ids)
+        cur = conn.execute(
+            f"SELECT id, request FROM specs WHERE id IN ({placeholders})", spec_ids
+        )
+        return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        conn.close()

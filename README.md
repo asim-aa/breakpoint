@@ -66,7 +66,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | V4a | Arbiter (verdict / confidence / coverage) + SQLite persistence + CLI | ✅ done |
 | V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
 | — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
-| — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | 🚧 auto-recorded on every `breakpoint run` now; not yet queryable — no `breakpoint patterns` command yet |
+| — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | ✅ done — `breakpoint patterns` |
 
 ## Eval results
 
@@ -83,7 +83,7 @@ sandbox.py          Isolated subprocess execution — the ground truth for every
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
 storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
 memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
-cli.py              `breakpoint run "<request>"` and `breakpoint history`
+cli.py              `breakpoint run "<request>"`, `breakpoint history`, `breakpoint patterns`
 manual_run.py       Ad-hoc single-request runner with a full round-by-round trace printed
 nodes/
   framer.py         Plain-English request → formal spec (JSON: inputs/output/constraints/examples)
@@ -94,7 +94,7 @@ nodes/
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
-tests/              69 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
+tests/              76 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 
 ## Quickstart
@@ -108,7 +108,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full test suite (69 tests) — no OpenRouter API key needed
+# Full test suite (76 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace
@@ -117,6 +117,9 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 # CLI: run + persist to SQLite
 ./venv/bin/python cli.py run "parse a CSV row, respecting quoted commas" --max-rounds 3
 ./venv/bin/python cli.py history
+
+# See recurring bug patterns across every run so far
+./venv/bin/python cli.py patterns
 
 # The 6-problem eval
 ./venv/bin/python eval/run_eval.py
