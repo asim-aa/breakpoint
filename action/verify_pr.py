@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from dotenv import load_dotenv
@@ -103,7 +105,18 @@ def main():
     any_bugs_found = False
     for file_path in files:
         code = Path(file_path).read_text()
-        result = verify_existing_code(code, context=args.context)
+        try:
+            result = verify_existing_code(code, context=args.context)
+        except (httpx.HTTPStatusError, RuntimeError) as e:
+            # A provider hiccup on one file shouldn't sink the whole run —
+            # report it plainly and keep verifying the rest, same resilience
+            # pattern as eval/run_eval.py.
+            print(f"  Provider failure verifying {file_path}, skipping: {e}")
+            reports.append(
+                f"## Breakpoint verification: `{file_path}`\n\n"
+                f"⚠️ **Skipped** — provider error: {e}"
+            )
+            continue
         reports.append(format_report(file_path, result))
         if result["verdict"] == "bugs_found":
             any_bugs_found = True

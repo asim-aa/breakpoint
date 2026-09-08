@@ -170,6 +170,33 @@ def test_diff_base_with_no_changed_files_exits_zero_without_verifying(monkeypatc
     assert "nothing to verify" in capsys.readouterr().out
 
 
+def test_provider_failure_on_one_file_does_not_crash_the_rest(monkeypatch, tmp_path, capsys):
+    # Live-observed: a reasoning Skeptic model can burn its whole token
+    # budget and make find_bugs raise RuntimeError. One flaky file
+    # shouldn't sink verification of every other changed file.
+    f1 = tmp_path / "a.py"
+    f2 = tmp_path / "b.py"
+    f1.write_text("def a(): pass")
+    f2.write_text("def b(): pass")
+
+    def flaky(code, context=""):
+        if "def a" in code:
+            raise RuntimeError("Model x returned empty content (finish_reason='length').")
+        return {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []}
+
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [str(f1), str(f2)])
+    monkeypatch.setattr(verify_pr, "verify_existing_code", flaky)
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        verify_pr.main()
+
+    assert exc_info.value.code == 0  # the surviving file found no bugs
+    out = capsys.readouterr().out
+    assert "Skipped" in out
+    assert "finish_reason" in out
+
+
 def test_diff_base_error_exits_with_code_2_and_clear_message(monkeypatch, capsys):
     def raise_error(base_ref):
         raise RuntimeError("git diff against 'bad-ref' failed: unknown revision")

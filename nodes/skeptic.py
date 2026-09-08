@@ -111,7 +111,17 @@ def find_bugs(spec: dict, code: str, retries: int = 2) -> list[str]:
     prompt = f"Spec:\n{json.dumps(spec, indent=2)}\n\nImplementation:\n{code}"
     last_error = None
     for _ in range(retries + 1):
-        raw = complete(prompt=prompt, model=skeptic_model, system=SYSTEM_PROMPT)
+        try:
+            # Reasoning models can spend their whole token budget on the
+            # hidden "reasoning" field before writing the actual JSON array,
+            # especially on real (non-toy) code — observed live against an
+            # 85-line file where the default budget wasn't enough. A wider
+            # cap here specifically, not raised globally in llm.py, since
+            # most callers don't need it.
+            raw = complete(prompt=prompt, model=skeptic_model, system=SYSTEM_PROMPT, max_tokens=8000)
+        except RuntimeError as e:
+            last_error = e
+            continue
         try:
             return _extract_json_array(raw)
         except (json.JSONDecodeError, ValueError) as e:
