@@ -11,7 +11,7 @@ on:
       file:
         description: "Python file to verify (leave blank to use diff-base instead)"
         required: false
-        default: "nodes/prover.py"
+        default: ""
       diff-base:
         description: "Git ref to diff against instead of a fixed file, e.g. HEAD~1"
         required: false
