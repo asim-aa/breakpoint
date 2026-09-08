@@ -103,7 +103,7 @@ No Prover, no retry loop — this reports findings on code a human already wrote
     context: ${{ github.event.pull_request.body }}
     openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
     prover-model: nvidia/nemotron-3-super-120b-a12b:free
-    skeptic-model: minimax/minimax-m3:free
+    skeptic-model: inclusionai/ling-3.0-flash-fin:free
 ```
 
 **Two ways to point it at code**: `file` for one explicit path, or `diff-base` to auto-detect every changed `.py` file against a git ref (e.g. a PR's base branch) — closing what used to be a stated V1 gap ("not parsed out of a multi-file diff"). `action/diff_utils.py` handles the detection with a plain `git diff --name-only`; verified against a real disposable git repo *and* against this project's own actual commit history (`get_changed_python_files("HEAD~1")` correctly returned the exact 8 `.py` files changed in a real prior commit here, no more no less). Using `diff-base` in a workflow needs `fetch-depth: 0` on the checkout step — GitHub's default shallow clone doesn't have the history to diff against.

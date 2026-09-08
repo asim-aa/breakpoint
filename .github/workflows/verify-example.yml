@@ -41,7 +41,7 @@ jobs:
           context: ${{ inputs.context }}
           openrouter-api-key: ${{ secrets.OPENROUTER_API_KEY }}
           prover-model: "nvidia/nemotron-3-super-120b-a12b:free"
-          skeptic-model: "minimax/minimax-m3:free"
+          skeptic-model: "inclusionai/ling-3.0-flash-fin:free"
           # No PR exists in a manual workflow_dispatch run, so there's
           # nothing to comment on — just show the report in the logs.
           post-comment: "false"
