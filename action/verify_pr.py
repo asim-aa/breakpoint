@@ -6,6 +6,13 @@ to auto-detect every changed .py file against a git ref (e.g. the PR's
 base branch) — closing the "not parsed out of a multi-file diff"
 limitation this file used to state. Either way, still verify-only: a real
 bug found is a finding for a human, never an auto-applied fix.
+
+In --diff-base mode, each changed file is narrowed further to just the
+top-level function(s) the diff actually touched (function-level diff
+extraction — see diff_utils.get_changed_functions): a smaller prompt per
+target, and a report that names the function, not just the file. A file
+falls back to whole-file verification when the diff doesn't map cleanly
+onto a function body (e.g. only a method or module-level code changed).
 """
 
 import argparse
@@ -21,8 +28,30 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from diff_utils import get_changed_python_files
+from diff_utils import get_changed_functions, get_changed_python_files
 from verify import verify_existing_code
+
+
+def targets_for_file(file_path: str, diff_base: str | None) -> list[tuple[str, str]]:
+    """(label, code) pairs to verify for one changed file. --file mode (no
+    diff_base) always verifies the whole file — there's no base ref to
+    diff against. --diff-base mode tries function-level extraction first;
+    an empty result (diff didn't map onto a top-level function) falls back
+    to the whole file, same as --file mode."""
+    if diff_base:
+        try:
+            functions = get_changed_functions(diff_base, file_path)
+        except RuntimeError as e:
+            # get_changed_python_files already succeeded against this same
+            # base_ref, so this is unexpected — but it's still just a
+            # narrowing step, not the verification itself. Fall back
+            # rather than losing the whole file over it.
+            print(f"  Could not extract function-level diff for {file_path}, verifying whole file: {e}")
+            functions = []
+        if functions:
+            return [(f"{file_path}::{fn['name']}", fn["source"]) for fn in functions]
+
+    return [(file_path, Path(file_path).read_text())]
 
 
 def format_report(file_path: str, result: dict) -> str:
@@ -104,22 +133,22 @@ def main():
     reports = []
     any_bugs_found = False
     for file_path in files:
-        code = Path(file_path).read_text()
-        try:
-            result = verify_existing_code(code, context=args.context)
-        except (httpx.HTTPStatusError, RuntimeError) as e:
-            # A provider hiccup on one file shouldn't sink the whole run —
-            # report it plainly and keep verifying the rest, same resilience
-            # pattern as eval/run_eval.py.
-            print(f"  Provider failure verifying {file_path}, skipping: {e}")
-            reports.append(
-                f"## Breakpoint verification: `{file_path}`\n\n"
-                f"⚠️ **Skipped** — provider error: {e}"
-            )
-            continue
-        reports.append(format_report(file_path, result))
-        if result["verdict"] == "bugs_found":
-            any_bugs_found = True
+        for label, code in targets_for_file(file_path, args.diff_base):
+            try:
+                result = verify_existing_code(code, context=args.context)
+            except (httpx.HTTPStatusError, RuntimeError) as e:
+                # A provider hiccup on one target shouldn't sink the whole
+                # run — report it plainly and keep verifying the rest, same
+                # resilience pattern as eval/run_eval.py.
+                print(f"  Provider failure verifying {label}, skipping: {e}")
+                reports.append(
+                    f"## Breakpoint verification: `{label}`\n\n"
+                    f"⚠️ **Skipped** — provider error: {e}"
+                )
+                continue
+            reports.append(format_report(label, result))
+            if result["verdict"] == "bugs_found":
+                any_bugs_found = True
 
     combined_report = "\n\n---\n\n".join(reports)
     print(combined_report)

@@ -74,6 +74,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | Per-model bug report: which bug patterns a specific Prover model reliably produces | ✅ done — `breakpoint model-report [model]` |
 | — | Multi-model leaderboard: compares Prover/Skeptic pairs by convergence rate and bugs caught | ✅ done — `breakpoint leaderboard` |
 | — | GitHub Action: verifies an existing PR's code (single file or auto-detected diff), not just generated code | ✅ done — run live 4x: found/fixed a real crash, then caught a real planted bug end-to-end, see below |
+| — | Function-level diff extraction: narrows `diff-base` mode to just the changed function(s), not the whole file | ✅ done — `action/diff_utils.get_changed_functions` |
 | — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
@@ -107,6 +108,8 @@ No Prover, no retry loop — this reports findings on code a human already wrote
 ```
 
 **Two ways to point it at code**: `file` for one explicit path, or `diff-base` to auto-detect every changed `.py` file against a git ref (e.g. a PR's base branch) — closing what used to be a stated V1 gap ("not parsed out of a multi-file diff"). `action/diff_utils.py` handles the detection with a plain `git diff --name-only`; verified against a real disposable git repo *and* against this project's own actual commit history (`get_changed_python_files("HEAD~1")` correctly returned the exact 8 `.py` files changed in a real prior commit here, no more no less). Using `diff-base` in a workflow needs `fetch-depth: 0` on the checkout step — GitHub's default shallow clone doesn't have the history to diff against.
+
+**Function-level diff extraction.** `diff-base` mode doesn't stop at "which files changed" — `get_changed_functions` reads the actual unified-diff hunks (`git diff -U0`, so every reported line range is a real addition, never surrounding context) and, via `ast`, narrows each changed file down to just the top-level function(s) whose body the diff actually overlaps. Each function is verified on its own — a smaller prompt per target, and a report that names `file.py::function_name`, not just the file. Deliberately top-level functions only: a method or nested function extracted alone can't run standalone in the sandbox (wrong indentation, or a bare `self` with no class), so a change to one of those — or to module-level code outside any function — falls back to verifying the whole file, the same as before this existed. This is a real narrowing, not a heuristic: proven against a real disposable git repo (`tests/test_diff_utils.py`) — the one modified function among several is the only one returned, an untouched sibling function's source never leaks into another function's extract, decorators are included, and a module-level constant change correctly returns nothing (triggering the whole-file fallback) rather than a false match.
 
 Verify-only either way — a real bug found is a finding for a human, never an auto-applied fix. `.github/workflows/verify-example.yml` demonstrates it against this repo's own code, but is deliberately `workflow_dispatch`-only (manual trigger), not wired into every push/PR — this repo's own CI (`test.yml`) already runs on every push, and OpenRouter's shared daily quota is tight enough (see below) that an auto-triggering example would silently compete with it.
 
@@ -150,7 +153,7 @@ verify.py           Verifies EXISTING code (no Prover, no retry loop) — the Gi
 action.yml          Composite GitHub Action wrapping verify.py for CI use
 action/
   verify_pr.py      CLI entry point: --file or --diff-base, runs verify.py per file, formats + optionally posts a PR comment
-  diff_utils.py     Auto-detects changed .py files from a real git diff — no API calls needed
+  diff_utils.py     Auto-detects changed .py files from a real git diff, and narrows each to its changed top-level function(s) via ast — no API calls needed
 tests/              142 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
 ```
 

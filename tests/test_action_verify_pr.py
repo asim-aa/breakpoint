@@ -170,6 +170,88 @@ def test_diff_base_with_no_changed_files_exits_zero_without_verifying(monkeypatc
     assert "nothing to verify" in capsys.readouterr().out
 
 
+# --- targets_for_file (function-level diff extraction) -----------------
+
+
+def test_targets_for_file_verifies_whole_file_without_a_diff_base(tmp_path):
+    f = tmp_path / "foo.py"
+    f.write_text("def f(): pass")
+
+    targets = verify_pr.targets_for_file(str(f), None)
+    assert targets == [(str(f), "def f(): pass")]
+
+
+def test_targets_for_file_uses_each_extracted_function_when_present(monkeypatch, tmp_path):
+    f = tmp_path / "foo.py"
+    f.write_text("def a(): pass\ndef b(): pass")
+
+    monkeypatch.setattr(
+        verify_pr,
+        "get_changed_functions",
+        lambda base_ref, file_path: [
+            {"name": "a", "start_line": 1, "end_line": 1, "source": "def a(): pass\n"},
+            {"name": "b", "start_line": 2, "end_line": 2, "source": "def b(): pass\n"},
+        ],
+    )
+
+    targets = verify_pr.targets_for_file(str(f), "main")
+    assert targets == [
+        (f"{f}::a", "def a(): pass\n"),
+        (f"{f}::b", "def b(): pass\n"),
+    ]
+
+
+def test_targets_for_file_falls_back_to_whole_file_when_no_functions_matched(monkeypatch, tmp_path):
+    f = tmp_path / "foo.py"
+    f.write_text("CONST = 1\n")
+
+    monkeypatch.setattr(verify_pr, "get_changed_functions", lambda base_ref, file_path: [])
+
+    targets = verify_pr.targets_for_file(str(f), "main")
+    assert targets == [(str(f), "CONST = 1\n")]
+
+
+def test_targets_for_file_falls_back_to_whole_file_on_extraction_error(monkeypatch, tmp_path, capsys):
+    f = tmp_path / "foo.py"
+    f.write_text("def f(): pass")
+
+    def raise_error(base_ref, file_path):
+        raise RuntimeError("git diff against 'main' failed: unknown revision")
+
+    monkeypatch.setattr(verify_pr, "get_changed_functions", raise_error)
+
+    targets = verify_pr.targets_for_file(str(f), "main")
+    assert targets == [(str(f), "def f(): pass")]
+    assert "verifying whole file" in capsys.readouterr().out
+
+
+def test_diff_base_labels_reports_by_function_when_extraction_succeeds(monkeypatch, tmp_path):
+    f = tmp_path / "foo.py"
+    f.write_text("def a(): pass\ndef b(): pass")
+
+    monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [str(f)])
+    monkeypatch.setattr(
+        verify_pr,
+        "get_changed_functions",
+        lambda base_ref, file_path: [
+            {"name": "a", "start_line": 1, "end_line": 1, "source": "def a(): pass\n"},
+        ],
+    )
+    calls = []
+    monkeypatch.setattr(
+        verify_pr,
+        "verify_existing_code",
+        lambda code, context="": calls.append(code)
+        or {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []},
+    )
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
+
+    with pytest.raises(SystemExit):
+        verify_pr.main()
+
+    assert calls == ["def a(): pass\n"]  # only the changed function was verified, not the whole file
+
+
 def test_provider_failure_on_one_file_does_not_crash_the_rest(monkeypatch, tmp_path, capsys):
     # Live-observed: a reasoning Skeptic model can burn its whole token
     # budget and make find_bugs raise RuntimeError. One flaky file
