@@ -9,7 +9,7 @@ def first_index_at_least(arr, target):
     lo, hi = 0, len(arr)
     while lo < hi:
         mid = (lo + hi) // 2
-        if arr[mid] < target:
+        if arr[mid] <= target:
             lo = mid + 1
         else:
             hi = mid
