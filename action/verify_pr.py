@@ -31,6 +31,17 @@ load_dotenv()
 from diff_utils import get_changed_functions, get_changed_python_files
 from verify import verify_existing_code
 
+_LANGUAGE_BY_SUFFIX = {".py": "python", ".js": "javascript"}
+
+
+def language_for_file(file_path: str) -> str:
+    # diff-base mode only ever detects .py files (get_changed_python_files
+    # filters to that extension, and get_changed_functions' AST-based
+    # extraction is Python-only), so this only meaningfully varies for
+    # --file mode. Defaults to python for an unrecognized extension rather
+    # than erroring, matching this Action's original (Python-only) behavior.
+    return _LANGUAGE_BY_SUFFIX.get(Path(file_path).suffix, "python")
+
 
 def targets_for_file(file_path: str, diff_base: str | None) -> list[tuple[str, str]]:
     """(label, code) pairs to verify for one changed file. --file mode (no
@@ -104,7 +115,7 @@ def post_pr_comment(body: str) -> None:
 def main():
     parser = argparse.ArgumentParser()
     target = parser.add_mutually_exclusive_group(required=True)
-    target.add_argument("--file", help="Path to one Python file to verify")
+    target.add_argument("--file", help="Path to one file to verify (.py or .js)")
     target.add_argument(
         "--diff-base",
         help="Git ref to diff against (e.g. origin/main) — auto-detects every "
@@ -133,9 +144,10 @@ def main():
     reports = []
     any_bugs_found = False
     for file_path in files:
+        language = language_for_file(file_path)
         for label, code in targets_for_file(file_path, args.diff_base):
             try:
-                result = verify_existing_code(code, context=args.context)
+                result = verify_existing_code(code, context=args.context, language=language)
             except (httpx.HTTPStatusError, RuntimeError) as e:
                 # A provider hiccup on one target shouldn't sink the whole
                 # run — report it plainly and keep verifying the rest, same

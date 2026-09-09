@@ -23,9 +23,9 @@ def _failing(stderr="AssertionError: boom"):
 
 
 def test_verify_reports_no_bugs_found_when_everything_passes(monkeypatch):
-    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="": {"function_name": "f"})
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: ["def test_a():\n    pass"])
-    monkeypatch.setattr(verify, "run_test", lambda code, test_code: _passing())
+    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="", **kwargs: {"function_name": "f"})
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: ["def test_a():\n    pass"])
+    monkeypatch.setattr(verify, "run_test", lambda code, test_code, **kwargs: _passing())
 
     result = verify.verify_existing_code("def f(x):\n    return x")
 
@@ -34,10 +34,10 @@ def test_verify_reports_no_bugs_found_when_everything_passes(monkeypatch):
 
 
 def test_verify_reports_bugs_found_for_a_real_failure(monkeypatch):
-    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="": {"function_name": "f"})
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: ["def test_none():\n    assert f(None)"])
-    monkeypatch.setattr(verify, "run_test", lambda code, test_code: _failing())
-    monkeypatch.setattr(verify, "validate_test", lambda spec, test_code, error: {"valid": True, "reason": ""})
+    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="", **kwargs: {"function_name": "f"})
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: ["def test_none():\n    assert f(None)"])
+    monkeypatch.setattr(verify, "run_test", lambda code, test_code, **kwargs: _failing())
+    monkeypatch.setattr(verify, "validate_test", lambda spec, test_code, error, **kwargs: {"valid": True, "reason": ""})
 
     result = verify.verify_existing_code("def f(x):\n    return x")
 
@@ -48,9 +48,9 @@ def test_verify_reports_bugs_found_for_a_real_failure(monkeypatch):
 
 def test_verify_does_not_call_validator_for_passing_tests(monkeypatch):
     validator_calls = []
-    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="": {"function_name": "f"})
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: ["def test_a():\n    pass"])
-    monkeypatch.setattr(verify, "run_test", lambda code, test_code: _passing())
+    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="", **kwargs: {"function_name": "f"})
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: ["def test_a():\n    pass"])
+    monkeypatch.setattr(verify, "run_test", lambda code, test_code, **kwargs: _passing())
     monkeypatch.setattr(verify, "validate_test", lambda *a, **k: validator_calls.append(1))
 
     verify.verify_existing_code("def f(x):\n    return x")
@@ -60,10 +60,10 @@ def test_verify_does_not_call_validator_for_passing_tests(monkeypatch):
 def test_verify_excludes_invalid_failures_from_verdict(monkeypatch):
     # The exact scenario the Validator exists for: a failing test that's
     # itself invalid must not count as a real bug.
-    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="": {"function_name": "f"})
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: ["def test_bad():\n    assert -3 + -1 == 1"])
-    monkeypatch.setattr(verify, "run_test", lambda code, test_code: _failing())
-    monkeypatch.setattr(verify, "validate_test", lambda spec, test_code, error: {"valid": False, "reason": "false assertion"})
+    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="", **kwargs: {"function_name": "f"})
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: ["def test_bad():\n    assert -3 + -1 == 1"])
+    monkeypatch.setattr(verify, "run_test", lambda code, test_code, **kwargs: _failing())
+    monkeypatch.setattr(verify, "validate_test", lambda spec, test_code, error, **kwargs: {"valid": False, "reason": "false assertion"})
 
     result = verify.verify_existing_code("def f(x):\n    return x")
 
@@ -76,17 +76,17 @@ def test_verify_passes_context_through_to_spec_inference(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         verify, "infer_spec_from_code",
-        lambda code, context="": captured.setdefault("context", context) or {"function_name": "f"},
+        lambda code, context="", **kwargs: captured.setdefault("context", context) or {"function_name": "f"},
     )
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: [])
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: [])
 
     verify.verify_existing_code("def f(x):\n    return x", context="fixes a null bug")
     assert captured["context"] == "fixes a null bug"
 
 
 def test_verify_handles_zero_generated_tests(monkeypatch):
-    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="": {"function_name": "f"})
-    monkeypatch.setattr(verify, "find_bugs", lambda spec, code: [])
+    monkeypatch.setattr(verify, "infer_spec_from_code", lambda code, context="", **kwargs: {"function_name": "f"})
+    monkeypatch.setattr(verify, "find_bugs", lambda spec, code, **kwargs: [])
 
     result = verify.verify_existing_code("def f(x):\n    return x")
     assert result["verdict"] == "no_bugs_found"

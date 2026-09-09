@@ -26,7 +26,7 @@ from sandbox import run_test
 
 
 def framer_node(state: BreakpointState) -> dict:
-    spec = frame(state["request"])
+    spec = frame(state["request"], language=state["language"])
     return {"spec": spec}
 
 
@@ -39,12 +39,12 @@ def prover_node(state: BreakpointState) -> dict:
         # advances when the Prover is about to attempt a fix.
         round_num += 1
 
-    code = prove(state["spec"], prior_failure=prior_failure)
+    code = prove(state["spec"], prior_failure=prior_failure, language=state["language"])
     return {"code": code, "round": round_num}
 
 
 def skeptic_node(state: BreakpointState) -> dict:
-    new_tests = find_bugs(state["spec"], state["code"])
+    new_tests = find_bugs(state["spec"], state["code"], language=state["language"])
     return {"pending_tests": new_tests}
 
 
@@ -56,7 +56,7 @@ def sandbox_node(state: BreakpointState) -> dict:
 
     results = []
     for test_code in all_test_codes:
-        result = run_test(state["code"], test_code)
+        result = run_test(state["code"], test_code, language=state["language"])
         # result.error is a short category ("timed out", "exited with code N")
         # while result.stderr carries the actual traceback/assertion message —
         # the Prover needs the latter to fix anything precisely.
@@ -95,7 +95,7 @@ def validator_node(state: BreakpointState) -> dict:
         if t["passed"]:
             validated.append({**t, "valid": True, "validation_reason": None})
         else:
-            verdict = validate_test(state["spec"], t["test_code"], t["error"])
+            verdict = validate_test(state["spec"], t["test_code"], t["error"], language=state["language"])
             validated.append(
                 {**t, "valid": verdict["valid"], "validation_reason": verdict["reason"]}
             )

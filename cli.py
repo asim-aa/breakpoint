@@ -40,6 +40,7 @@ def cmd_run(args):
     result = app.invoke(
         {
             "request": args.request,
+            "language": args.language,
             "spec": {},
             "code": "",
             "pending_tests": [],
@@ -185,6 +186,10 @@ def main():
     run_parser = subparsers.add_parser("run", help="run the full graph on a request")
     run_parser.add_argument("request")
     run_parser.add_argument("--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS)
+    run_parser.add_argument(
+        "--language", choices=["python", "javascript"], default="python",
+        help="target language for the Prover/Skeptic/sandbox (default: python)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     history_parser = subparsers.add_parser("history", help="list past runs")

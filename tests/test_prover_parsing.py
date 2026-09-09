@@ -42,3 +42,24 @@ def test_returns_text_unchanged_if_no_def_or_fence_found():
     # pass the raw text through for the caller (compile() check) to reject.
     text = "I refuse to answer this request."
     assert _extract_code(text) == text
+
+
+def test_extracts_code_from_javascript_fence():
+    # A real bug this generalization fixes: the old regex only recognized
+    # the literal tag "python" — any other fence tag (e.g. "javascript")
+    # fell through to matching zero characters for the tag, then captured
+    # the tag word ITSELF as part of the code.
+    text = "```javascript\nfunction f(x) {\n  return x;\n}\n```"
+    result = _extract_code(text, language="javascript")
+    assert result == "function f(x) {\n  return x;\n}"
+    assert "javascript" not in result
+
+
+def test_extracts_code_with_leading_prose_no_fence_javascript():
+    text = (
+        "Here's my implementation:\n\n"
+        "function merge(a, b) {\n  return a.concat(b);\n}"
+    )
+    result = _extract_code(text, language="javascript")
+    assert result.startswith("function merge(a, b)")
+    assert "Here's my implementation" not in result

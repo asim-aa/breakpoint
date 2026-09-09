@@ -14,7 +14,10 @@ found and fixed" section for the live example that motivated this.
 
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -40,7 +43,7 @@ Respond with STRICT JSON: {"valid": true or false, "reason": "one sentence"}
 Output ONLY the JSON object, no commentary, no markdown fences."""
 
 
-def _static_syntax_check(test_code: str) -> str | None:
+def _static_syntax_check_python(test_code: str) -> str | None:
     # Free, local, no LLM call: a test that doesn't even compile on its own
     # is definitely invalid, regardless of what the implementation does.
     try:
@@ -48,6 +51,32 @@ def _static_syntax_check(test_code: str) -> str | None:
         return None
     except SyntaxError as e:
         return f"test itself does not compile: {e}"
+
+
+def _static_syntax_check_javascript(test_code: str) -> str | None:
+    # Same idea as the Python path, via `node --check` (syntax-only, never
+    # executes the code) — there's no in-process JS parser in the stdlib.
+    # KNOWN GAP: if `node` isn't installed, this can't confirm anything
+    # either way and returns None (falls through to the semantic LLM
+    # check), rather than blocking on a missing local dependency.
+    if shutil.which("node") is None:
+        return None
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+        f.write(test_code)
+        path = f.name
+    try:
+        proc = subprocess.run(["node", "--check", path], capture_output=True, text=True, timeout=5)
+    finally:
+        os.unlink(path)
+    if proc.returncode != 0:
+        return f"test itself does not compile: {proc.stderr.strip()}"
+    return None
+
+
+_STATIC_SYNTAX_CHECKS = {
+    "python": _static_syntax_check_python,
+    "javascript": _static_syntax_check_javascript,
+}
 
 
 def _extract_json(text: str) -> dict:
@@ -59,8 +88,8 @@ def _extract_json(text: str) -> dict:
     return json.loads(text.strip())
 
 
-def validate_test(spec: dict, test_code: str, error: str | None) -> dict:
-    static_issue = _static_syntax_check(test_code)
+def validate_test(spec: dict, test_code: str, error: str | None, language: str = "python") -> dict:
+    static_issue = _STATIC_SYNTAX_CHECKS[language](test_code)
     if static_issue:
         return {"valid": False, "reason": static_issue}
 

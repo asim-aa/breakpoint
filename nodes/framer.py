@@ -10,17 +10,30 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from llm import complete
 
-SYSTEM_PROMPT = """You are the Framer in an adversarial code-generation system.
+_NAMING_CONVENTION = {
+    "python": "snake_case",
+    "javascript": "camelCase",
+}
+
+_DISPLAY_NAME = {
+    "python": "Python",
+    "javascript": "JavaScript",
+}
+
+SYSTEM_PROMPT_TEMPLATE = """You are the Framer in an adversarial code-generation system.
 Given a plain-English coding request, produce a formal spec as STRICT JSON
 with exactly these keys, and no others:
 
-{
+{{
   "function_name": "string",
-  "inputs": [{"name": "string", "type": "string", "description": "string"}],
-  "output": {"type": "string", "description": "string"},
+  "inputs": [{{"name": "string", "type": "string", "description": "string"}}],
+  "output": {{"type": "string", "description": "string"}},
   "constraints": ["string", ...],
-  "examples": [{"input": ..., "output": ...}, ...]
-}
+  "examples": [{{"input": ..., "output": ...}}, ...]
+}}
+
+The target language is {language}: function_name and every input name
+should follow {convention} naming.
 
 Output ONLY the JSON object. No markdown fences, no commentary, no
 explanation before or after."""
@@ -73,14 +86,17 @@ def _extract_json(text: str) -> dict:
     return json.loads(balanced)
 
 
-def frame(request: str, retries: int = 2) -> dict:
+def frame(request: str, retries: int = 2, language: str = "python") -> dict:
     model = os.environ["PROVER_MODEL"]
+    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(
+        language=_DISPLAY_NAME[language], convention=_NAMING_CONVENTION[language]
+    )
     last_error = None
     for _ in range(retries + 1):
         raw = complete(
             prompt=f"Coding request: {request}",
             model=model,
-            system=SYSTEM_PROMPT,
+            system=system_prompt,
         )
         try:
             return _extract_json(raw)
@@ -89,18 +105,18 @@ def frame(request: str, retries: int = 2) -> dict:
     raise last_error
 
 
-INFER_SYSTEM_PROMPT = """You are the Framer in an adversarial code-verification
-system. You are given an EXISTING Python function implementation — not a
-request to write new code — and your job is to infer the formal spec it
+INFER_SYSTEM_PROMPT_TEMPLATE = """You are the Framer in an adversarial code-verification
+system. You are given an EXISTING {language} function implementation — not
+a request to write new code — and your job is to infer the formal spec it
 appears to implement, as STRICT JSON with exactly these keys, and no others:
 
-{
+{{
   "function_name": "string",
-  "inputs": [{"name": "string", "type": "string", "description": "string"}],
-  "output": {"type": "string", "description": "string"},
+  "inputs": [{{"name": "string", "type": "string", "description": "string"}}],
+  "output": {{"type": "string", "description": "string"}},
   "constraints": ["string", ...],
-  "examples": [{"input": ..., "output": ...}, ...]
-}
+  "examples": [{{"input": ..., "output": ...}}, ...]
+}}
 
 Infer constraints from what the code's logic and any docstring/comments
 imply it should handle — do not just describe what the code currently
@@ -113,15 +129,16 @@ Output ONLY the JSON object. No markdown fences, no commentary, no
 explanation before or after."""
 
 
-def infer_spec_from_code(code: str, context: str = "", retries: int = 2) -> dict:
+def infer_spec_from_code(code: str, context: str = "", retries: int = 2, language: str = "python") -> dict:
     model = os.environ["PROVER_MODEL"]
+    system_prompt = INFER_SYSTEM_PROMPT_TEMPLATE.format(language=_DISPLAY_NAME[language])
     prompt = f"Existing implementation:\n{code}"
     if context:
         prompt += f"\n\nAdditional context (e.g. PR description):\n{context}"
 
     last_error = None
     for _ in range(retries + 1):
-        raw = complete(prompt=prompt, model=model, system=INFER_SYSTEM_PROMPT)
+        raw = complete(prompt=prompt, model=model, system=system_prompt)
         try:
             return _extract_json(raw)
         except (json.JSONDecodeError, ValueError) as e:

@@ -4,13 +4,16 @@ LLM) is tested with nodes.validator.complete monkeypatched, so this whole
 suite runs for $0 with no network access — consistent with how the rest
 of this test directory avoids touching a real provider."""
 
+import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pytest
+
 import nodes.validator as validator
-from nodes.validator import _static_syntax_check, validate_test
+from nodes.validator import _static_syntax_check_javascript, _static_syntax_check_python, validate_test
 
 
 def test_static_check_catches_real_walrus_misuse():
@@ -23,14 +26,14 @@ def test_static_check_catches_real_walrus_misuse():
         "    assert nums := [-3, 4, 7, 2]\n"
         "    assert two_sum_indices(nums, 1) in ([0, 3], [3, 0])\n"
     )
-    result = _static_syntax_check(broken)
+    result = _static_syntax_check_python(broken)
     assert result is not None
     assert "does not compile" in result
 
 
 def test_static_check_passes_valid_syntax():
     fine = "def test_empty():\n    assert f([]) == []\n"
-    assert _static_syntax_check(fine) is None
+    assert _static_syntax_check_python(fine) is None
 
 
 def test_static_check_passes_syntactically_valid_but_semantically_false_assertion():
@@ -38,7 +41,26 @@ def test_static_check_passes_syntactically_valid_but_semantically_false_assertio
     # fine — catching that it's WRONG requires the semantic (LLM) check,
     # not the free static one. This test documents that boundary.
     false_assertion = "def test_x():\n    assert -3 + -1 == 1\n"
-    assert _static_syntax_check(false_assertion) is None
+    assert _static_syntax_check_python(false_assertion) is None
+
+
+def test_static_check_javascript_catches_real_syntax_error():
+    # Node's own parser, not a guess — same free-check philosophy as the
+    # Python path, just via `node --check` since there's no in-process JS
+    # parser in the stdlib.
+    if shutil.which("node") is None:
+        pytest.skip("node not available in this environment")
+    broken = "function test_x() {\n    assert.ok(true withoutclosing\n"
+    result = _static_syntax_check_javascript(broken)
+    assert result is not None
+    assert "does not compile" in result
+
+
+def test_static_check_javascript_passes_valid_syntax():
+    if shutil.which("node") is None:
+        pytest.skip("node not available in this environment")
+    fine = "function test_x() {\n    assert.strictEqual(1, 1);\n}\n"
+    assert _static_syntax_check_javascript(fine) is None
 
 
 def test_validate_test_short_circuits_on_syntax_error_without_calling_llm(monkeypatch):

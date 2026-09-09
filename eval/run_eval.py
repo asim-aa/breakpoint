@@ -35,6 +35,7 @@ def run_breakpoint_mode(request: str) -> dict:
     result = app.invoke(
         {
             "request": request,
+            "language": "python",  # the eval problem set is Python-only for now
             "spec": {},
             "code": "",
             "pending_tests": [],

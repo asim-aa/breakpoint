@@ -16,13 +16,13 @@ from nodes.validator import validate_test
 from sandbox import run_test
 
 
-def verify_existing_code(code: str, context: str = "") -> dict:
-    spec = infer_spec_from_code(code, context=context)
-    test_codes = find_bugs(spec, code)
+def verify_existing_code(code: str, context: str = "", language: str = "python") -> dict:
+    spec = infer_spec_from_code(code, context=context, language=language)
+    test_codes = find_bugs(spec, code, language=language)
 
     results = []
     for test_code in test_codes:
-        result = run_test(code, test_code)
+        result = run_test(code, test_code, language=language)
         diagnostic = None
         if not result.passed:
             diagnostic = result.stderr.strip() if result.stderr.strip() else result.error
@@ -33,7 +33,7 @@ def verify_existing_code(code: str, context: str = "") -> dict:
         if r["passed"]:
             validated.append({**r, "valid": True, "validation_reason": None})
         else:
-            verdict = validate_test(spec, r["test_code"], r["error"])
+            verdict = validate_test(spec, r["test_code"], r["error"], language=language)
             validated.append(
                 {**r, "valid": verdict["valid"], "validation_reason": verdict["reason"]}
             )

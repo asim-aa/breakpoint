@@ -6,6 +6,7 @@ execution, never from a model's opinion.
 
 import functools
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -28,17 +29,36 @@ except ImportError:
 CPU_LIMIT_SECONDS = 5
 MEMORY_LIMIT_BYTES = 256 * 1024 * 1024  # 256 MB
 
-# Pinned by digest, not just tag — a compromised/republished `3.12-slim`
-# tag can't silently change what runs inside the sandbox. This is the
-# manifest-LIST digest (covers every platform Docker publishes for this
-# image, e.g. amd64 and arm64), fetched live from the registry, not
-# guessed: https://hub.docker.com/_/python — tag python:3.12-slim as of
-# 2026-09-09, image version 3.12.14-slim-trixie. Re-pin periodically to
-# pick up security patches — an old digest never updates itself.
-DOCKER_IMAGE = "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
 DOCKER_MEMORY_LIMIT = "256m"
 DOCKER_CPU_LIMIT = "1"
 DOCKER_PIDS_LIMIT = "64"
+
+# Both pinned by digest, not just tag — a compromised/republished tag
+# can't silently change what runs inside the sandbox. Manifest-LIST
+# digests (cover every platform Docker publishes for the image, e.g.
+# amd64 and arm64), fetched live from the registry, not guessed:
+# https://hub.docker.com/_/python — python:3.12-slim as of 2026-09-09,
+#   image version 3.12.14-slim-trixie.
+# https://hub.docker.com/_/node — node:20-slim as of 2026-09-09,
+#   image version 20-bookworm-slim.
+# Re-pin periodically to pick up security patches — an old digest never
+# updates itself.
+_LANGUAGES = {
+    "python": {
+        "docker_image": "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea",
+        "filename": "run.py",
+        "docker_cmd": ["python", "run.py"],
+        "docker_env": ["PYTHONDONTWRITEBYTECODE=1"],
+    },
+    "javascript": {
+        "docker_image": "node:20-slim@sha256:2cf067cfed83d5ea958367df9f966191a942351a2df77d6f0193e162b5febfc0",
+        "filename": "run.js",
+        "docker_cmd": ["node", "run.js"],
+        "docker_env": [],
+    },
+}
+
+_JS_TEST_NAME_RE = re.compile(r"(?m)^function\s+(test_\w+)\s*\(")
 
 
 @dataclass
@@ -58,12 +78,39 @@ def _preexec_fn():
     resource.setrlimit(resource.RLIMIT_AS, (MEMORY_LIMIT_BYTES, MEMORY_LIMIT_BYTES))
 
 
-@functools.lru_cache(maxsize=1)
-def _docker_available() -> bool:
-    """True if a real Docker daemon is reachable AND the sandbox image is
-    ready to run offline. Checked (and the image pulled, if missing) once
-    per process — pulling inline during an actual sandboxed run would blow
-    a 5-second test timeout on a cold image cache."""
+def _build_harness(code: str, test_code: str, language: str) -> str:
+    if language == "python":
+        return (
+            f"{code}\n\n"
+            f"{test_code}\n\n"
+            "if __name__ == '__main__':\n"
+            "    import inspect, sys as _sys\n"
+            "    _mod = _sys.modules['__main__']\n"
+            "    _test_fns = [v for k, v in vars(_mod).items()\n"
+            "                 if k.startswith('test_') and inspect.isfunction(v)]\n"
+            "    for _fn in _test_fns:\n"
+            "        _fn()\n"
+        )
+
+    # JavaScript: a file run via `node file.js` wraps the whole file in a
+    # module-scope function, so top-level `function` declarations never
+    # land on `global` the way Python's module attributes do — there's no
+    # equivalent of `vars(_mod)` to auto-discover them. Instead, extract
+    # each test_* function's name directly from test_code (by this point
+    # it's already a single self-contained test — see
+    # skeptic._split_multi_def_tests) and call it by name explicitly.
+    test_names = _JS_TEST_NAME_RE.findall(test_code)
+    calls = "\n".join(f"{name}();" for name in test_names)
+    return f"const assert = require('assert');\n\n{code}\n\n{test_code}\n\n{calls}\n"
+
+
+@functools.lru_cache(maxsize=None)
+def _docker_available(language: str) -> bool:
+    """True if a real Docker daemon is reachable AND the sandbox image for
+    this language is ready to run offline. Checked (and the image pulled,
+    if missing) once per language per process — pulling inline during an
+    actual sandboxed run would blow a 5-second test timeout on a cold
+    image cache."""
     if shutil.which("docker") is None:
         return False
     try:
@@ -71,20 +118,17 @@ def _docker_available() -> bool:
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return False
 
-    have_image = subprocess.run(
-        ["docker", "image", "inspect", DOCKER_IMAGE], capture_output=True
-    )
+    image = _LANGUAGES[language]["docker_image"]
+    have_image = subprocess.run(["docker", "image", "inspect", image], capture_output=True)
     if have_image.returncode != 0:
         try:
-            subprocess.run(
-                ["docker", "pull", DOCKER_IMAGE], capture_output=True, timeout=180, check=True
-            )
+            subprocess.run(["docker", "pull", image], capture_output=True, timeout=180, check=True)
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
             return False
     return True
 
 
-def _run_in_docker(tmpdir: str, timeout_seconds: int) -> SandboxResult:
+def _run_in_docker(tmpdir: str, timeout_seconds: int, language: str) -> SandboxResult:
     """Runs the sandboxed script inside a locked-down container: no
     network at all (not just stripped env vars), every Linux capability
     dropped, no privilege escalation, a read-only root filesystem, a
@@ -93,6 +137,7 @@ def _run_in_docker(tmpdir: str, timeout_seconds: int) -> SandboxResult:
     host platform or the interpreter's own allocator. Runs as the host's
     own uid:gid — not root, and avoids bind-mount permission mismatches
     from a fixed low-privilege uid not owning the mounted temp dir."""
+    lang = _LANGUAGES[language]
     container_name = f"breakpoint-sandbox-{uuid.uuid4().hex[:12]}"
     cmd = [
         "docker",
@@ -117,15 +162,16 @@ def _run_in_docker(tmpdir: str, timeout_seconds: int) -> SandboxResult:
         DOCKER_CPU_LIMIT,
         "--user",
         f"{os.getuid()}:{os.getgid()}",
-        "-e",
-        "PYTHONDONTWRITEBYTECODE=1",
+    ]
+    for env_var in lang["docker_env"]:
+        cmd += ["-e", env_var]
+    cmd += [
         "-v",
         f"{tmpdir}:/sandbox:ro",
         "-w",
         "/sandbox",
-        DOCKER_IMAGE,
-        "python",
-        "run.py",
+        lang["docker_image"],
+        *lang["docker_cmd"],
     ]
 
     try:
@@ -151,23 +197,38 @@ def _run_in_docker(tmpdir: str, timeout_seconds: int) -> SandboxResult:
     )
 
 
-def _run_in_subprocess(tmpdir: str, script_path: Path, timeout_seconds: int) -> SandboxResult:
-    # Strip the environment to the minimum needed to run Python — no
-    # inherited API keys, no network-relevant env vars.
+def _subprocess_command(script_path: Path, language: str) -> list[str]:
+    if language == "python":
+        return [sys.executable, str(script_path)]
+
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError(
+            "JavaScript sandboxing needs either Docker or a local `node` binary; neither was found."
+        )
+    return [node, str(script_path)]
+
+
+def _run_in_subprocess(tmpdir: str, script_path: Path, timeout_seconds: int, language: str) -> SandboxResult:
+    # Strip the environment to the minimum needed to run the interpreter —
+    # no inherited API keys, no network-relevant env vars.
     minimal_env = {"PATH": "/usr/bin:/bin"}
 
     kwargs = {}
-    if HAS_RESOURCE:
+    if HAS_RESOURCE and language == "python":
+        # preexec_fn applies rlimits to the child we're about to exec —
+        # meaningful for `python run.py`. Node has no equivalent RLIMIT_AS
+        # reliability concern to work around here, and this whole path is
+        # itself already the fallback for when Docker (which enforces real
+        # cgroup limits for either language) isn't available.
         kwargs["preexec_fn"] = _preexec_fn
     # KNOWN GAP: on platforms without the resource module (or where it's
     # disabled above), no CPU/memory ceiling is enforced beyond the
-    # wall-clock timeout below. See README "Security notes". This whole
-    # path is itself the fallback for when Docker isn't available — see
-    # _docker_available() and run_test() below.
+    # wall-clock timeout below. See README "Security notes".
 
     try:
         proc = subprocess.run(
-            [sys.executable, str(script_path)],
+            _subprocess_command(script_path, language),
             cwd=tmpdir,
             env=minimal_env,
             capture_output=True,
@@ -195,26 +256,19 @@ def _run_in_subprocess(tmpdir: str, script_path: Path, timeout_seconds: int) -> 
     )
 
 
-def run_test(code: str, test_code: str, timeout_seconds: int = 5) -> SandboxResult:
-    combined = (
-        f"{code}\n\n"
-        f"{test_code}\n\n"
-        "if __name__ == '__main__':\n"
-        "    import inspect, sys as _sys\n"
-        "    _mod = _sys.modules['__main__']\n"
-        "    _test_fns = [v for k, v in vars(_mod).items()\n"
-        "                 if k.startswith('test_') and inspect.isfunction(v)]\n"
-        "    for _fn in _test_fns:\n"
-        "        _fn()\n"
-    )
+def run_test(code: str, test_code: str, timeout_seconds: int = 5, language: str = "python") -> SandboxResult:
+    if language not in _LANGUAGES:
+        raise ValueError(f"Unsupported language: {language!r} (supported: {list(_LANGUAGES)})")
+
+    combined = _build_harness(code, test_code, language)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        script_path = Path(tmpdir) / "run.py"
+        script_path = Path(tmpdir) / _LANGUAGES[language]["filename"]
         script_path.write_text(combined)
 
-        if _docker_available():
+        if _docker_available(language):
             try:
-                return _run_in_docker(tmpdir, timeout_seconds)
+                return _run_in_docker(tmpdir, timeout_seconds, language)
             except (subprocess.SubprocessError, OSError):
                 # Docker was reachable at the availability check but this
                 # specific invocation failed (e.g. daemon died mid-run) —
@@ -222,4 +276,4 @@ def run_test(code: str, test_code: str, timeout_seconds: int = 5) -> SandboxResu
                 # this test entirely.
                 pass
 
-        return _run_in_subprocess(tmpdir, script_path, timeout_seconds)
+        return _run_in_subprocess(tmpdir, script_path, timeout_seconds, language)

@@ -6,6 +6,7 @@ DEFAULT_MAX_ROUNDS = 5
 
 class BreakpointState(TypedDict):
     request: str
+    language: str
     spec: dict
     code: str
     pending_tests: list

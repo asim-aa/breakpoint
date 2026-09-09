@@ -81,6 +81,63 @@ def test_find_balanced_array_ignores_brackets_inside_strings():
     assert result == text
 
 
+def test_skips_non_string_entries_in_the_array():
+    # Real failure observed live: despite the "list of strings"
+    # instruction, a model emitted a stray non-string element (a bare
+    # int) alongside otherwise-valid test strings. One malformed entry
+    # shouldn't crash extraction or lose the real tests around it.
+    text = json.dumps(["def test_a():\n    assert True", 42, "def test_b():\n    assert True"])
+    result = _extract_json_array(text)
+    assert result == ["def test_a():\n    assert True", "def test_b():\n    assert True"]
+
+
 def test_raises_value_error_when_no_array_present():
     with pytest.raises(ValueError):
         _extract_json_array("I cannot generate tests for this.")
+
+
+def test_recovers_plain_javascript_source_when_json_array_instruction_ignored():
+    # Real failure captured live: the Skeptic model ignored the "respond
+    # with a JSON array of strings" instruction entirely and just wrote a
+    # plain JS test file with a `//` comment before each function — no
+    # brackets, no quotes, nothing json.loads or the balanced-array finder
+    # can work with. Previously this raised and crashed the whole run;
+    # now it's recovered via the same multi-def splitter used for a
+    # bundled JSON entry.
+    raw = (
+        "// Test 1: empty string returns empty string\n"
+        "function test_emptyStringReturnsEmpty() {\n"
+        "  assert.strictEqual(f(''), '');\n"
+        "}\n\n"
+        "// Test 2: single word with no spaces\n"
+        "function test_singleWordNoSpaces() {\n"
+        "  assert.strictEqual(f('hello'), 'olleh');\n"
+        "}\n"
+    )
+    result = _extract_json_array(raw, language="javascript")
+    assert len(result) == 2
+    assert result[0].startswith("function test_emptyStringReturnsEmpty")
+    assert result[1].startswith("function test_singleWordNoSpaces")
+    assert "test_singleWordNoSpaces" not in result[0]
+
+
+def test_splits_multiple_javascript_defs_bundled_in_one_entry():
+    bundled = (
+        "function test_empty_list() {\n"
+        "  assert.strictEqual(f([]), null);\n"
+        "}\n\n"
+        "function test_negative_numbers() {\n"
+        "  assert.deepStrictEqual(f([-3, 4, 7, -1]), [0, 3]);\n"
+        "}\n"
+    )
+    result = _split_multi_def_tests([bundled], language="javascript")
+    assert len(result) == 2
+    assert result[0].startswith("function test_empty_list")
+    assert result[1].startswith("function test_negative_numbers")
+    assert "test_negative_numbers" not in result[0]
+
+
+def test_leaves_single_javascript_def_entry_unsplit():
+    single = "function test_single() {\n  assert.ok(true);\n}\n"
+    result = _split_multi_def_tests([single], language="javascript")
+    assert result == [single]

@@ -1,3 +1,4 @@
+import shutil
 import sys
 from pathlib import Path
 
@@ -13,19 +14,29 @@ from sandbox import _docker_available, run_test
 # produced it, so they hold regardless of whether Docker is installed
 # here. The Docker-specific tests below are the ones that only prove
 # something new when Docker is actually available (e.g. real CI).
-EXPECTED_ISOLATION = "docker" if _docker_available() else "subprocess"
+EXPECTED_ISOLATION = "docker" if _docker_available("python") else "subprocess"
+
+requires_docker = pytest.mark.skipif(
+    not _docker_available("python"), reason="Docker not available in this environment"
+)
+requires_node = pytest.mark.skipif(
+    shutil.which("node") is None and not _docker_available("javascript"),
+    reason="Neither Docker nor a local node binary is available",
+)
 
 
-def test_docker_image_is_pinned_by_digest():
+def test_docker_images_are_pinned_by_digest():
     # A bare tag (e.g. "python:3.12-slim") can be silently republished by
     # its maintainer — pinning by digest means the sandbox always runs the
     # exact image that was reviewed, not whatever the tag currently points
-    # to. Guards against someone reverting sandbox.DOCKER_IMAGE back to a
-    # plain tag without noticing.
-    assert "@sha256:" in sandbox.DOCKER_IMAGE
-    digest = sandbox.DOCKER_IMAGE.split("@sha256:", 1)[1]
-    assert len(digest) == 64
-    assert all(c in "0123456789abcdef" for c in digest)
+    # to. Guards against someone reverting a sandbox._LANGUAGES entry back
+    # to a plain tag without noticing.
+    for language, config in sandbox._LANGUAGES.items():
+        image = config["docker_image"]
+        assert "@sha256:" in image, language
+        digest = image.split("@sha256:", 1)[1]
+        assert len(digest) == 64, language
+        assert all(c in "0123456789abcdef" for c in digest), language
 
 
 def test_passing_assertion():
@@ -62,13 +73,18 @@ def test_unhandled_exception():
     assert "ZeroDivisionError" in result.stderr
 
 
+def test_rejects_unsupported_language():
+    with pytest.raises(ValueError, match="Unsupported language"):
+        run_test("code", "test", language="ruby")
+
+
 def test_falls_back_to_subprocess_when_docker_invocation_fails(monkeypatch):
     # Docker looked available at the startup check but this specific
     # invocation fails (e.g. the daemon died mid-run) — one flaky call
     # shouldn't lose the test, it should fall back and still run it.
-    monkeypatch.setattr(sandbox, "_docker_available", lambda: True)
+    monkeypatch.setattr(sandbox, "_docker_available", lambda language: True)
 
-    def raise_error(tmpdir, timeout_seconds):
+    def raise_error(tmpdir, timeout_seconds, language):
         raise OSError("docker daemon went away")
 
     monkeypatch.setattr(sandbox, "_run_in_docker", raise_error)
@@ -80,16 +96,60 @@ def test_falls_back_to_subprocess_when_docker_invocation_fails(monkeypatch):
     assert result.isolation == "subprocess"
 
 
+# --- JavaScript ----------------------------------------------------------
+# Real execution, not mocked — via Docker if available, otherwise a local
+# `node` binary (present on this dev machine even without Docker).
+
+
+@requires_node
+def test_javascript_passing_assertion():
+    code = "function add(a, b) {\n  return a + b;\n}\n"
+    test = "function test_add() {\n  assert.strictEqual(add(2, 3), 5);\n}\n"
+    result = run_test(code, test, language="javascript")
+    assert result.passed is True
+    assert result.timed_out is False
+
+
+@requires_node
+def test_javascript_failing_assertion():
+    code = "function add(a, b) {\n  return a - b;\n}\n"
+    test = "function test_add() {\n  assert.strictEqual(add(2, 3), 5);\n}\n"
+    result = run_test(code, test, language="javascript")
+    assert result.passed is False
+    assert "AssertionError" in result.stderr
+
+
+@requires_node
+def test_javascript_unhandled_exception():
+    code = "function boom() {\n  throw new Error('kaboom');\n}\n"
+    test = "function test_boom() {\n  boom();\n}\n"
+    result = run_test(code, test, language="javascript")
+    assert result.passed is False
+    assert "kaboom" in result.stderr
+
+
+@requires_node
+def test_javascript_infinite_loop_times_out():
+    code = "function loopForever() {\n  while (true) {}\n}\n"
+    test = "function test_loop() {\n  loopForever();\n}\n"
+    result = run_test(code, test, timeout_seconds=2, language="javascript")
+    assert result.timed_out is True
+    assert result.passed is False
+
+
+def test_javascript_without_node_or_docker_raises_clear_error(monkeypatch):
+    monkeypatch.setattr(sandbox, "_docker_available", lambda language: False)
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(RuntimeError, match="JavaScript sandboxing needs"):
+        run_test("function f() {}", "function test_f() { f(); }", language="javascript")
+
+
 # --- Docker-specific isolation guarantees -------------------------------
 # These only prove something when Docker is actually reachable — the bare
 # subprocess sandbox never blocked network or filesystem access at the OS
 # level, so there's nothing new to assert without Docker running. Skipped
 # here if Docker isn't installed (e.g. this dev machine); they run for
 # real in CI, where GitHub's hosted runners have a live Docker daemon.
-
-requires_docker = pytest.mark.skipif(
-    not _docker_available(), reason="Docker not available in this environment"
-)
 
 
 @requires_docker

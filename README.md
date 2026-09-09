@@ -58,7 +58,8 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | Persistence | **SQLite** | Every spec, every round's attempt, every test result — queryable, not just printed to a terminal |
 | Bug-pattern memory | **Hugging Face** (`sentence-transformers`, local) | Embeds each real bug's signature and clusters it against previously-seen patterns — runs entirely on-device, $0/call, no OpenRouter dependency |
 | Dashboard | **Flask** (local only) | Read-only web view over the same SQLite data the CLI prints — no JS framework, no build step |
-| Language | **Python 3.12** | Whole project, stdlib-first (`sqlite3`, `subprocess`, `argparse` — dependencies added only where they earn their place) |
+| Language | **Python 3.12** | The system itself. Stdlib-first (`sqlite3`, `subprocess`, `argparse` — dependencies added only where they earn their place) |
+| Target languages | **Python, JavaScript** | What the Prover/Skeptic/sandbox actually generate and test — `--language javascript` runs the identical adversarial pipeline against Node instead of Python |
 
 ## Status
 
@@ -76,6 +77,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | GitHub Action: verifies an existing PR's code (single file or auto-detected diff), not just generated code | ✅ done — run live 4x: found/fixed a real crash, then caught a real planted bug end-to-end, see below |
 | — | Function-level diff extraction: narrows `diff-base` mode to just the changed function(s), not the whole file | ✅ done — `action/diff_utils.get_changed_functions` |
 | — | Real OS-level sandbox isolation: network-none, dropped capabilities, read-only rootfs, non-root, cgroup limits | ✅ done — Docker when available, honest subprocess fallback otherwise, see Security notes |
+| — | Multi-language support: the full adversarial pipeline (Framer/Prover/Skeptic/sandbox/Validator) targets JavaScript, not just Python | ✅ done — `--language javascript`, run live end-to-end, see below. GitHub Action's `--file` mode also detects `.js`; `diff-base` mode and the eval stay Python-only for now |
 | — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
@@ -83,6 +85,18 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 The eval now runs with the Validator active (see below), on the full N=6 problem set — the 6th problem needed three attempts across two sessions to complete, due to a retired free-tier Skeptic model and a sustained Nvidia outage, both logged plainly rather than hidden (see the methodology note in the report). Earlier eval runs (before the Validator existed) showed the core thesis clearly: **a non-adversarial self-check said "correct" on 3 different implementations that real, executed tests proved were buggy.** Full breakdown, exact numbers, and known limitations for the current run — stated plainly, not smoothed over — are in [eval/report.md](eval/report.md).
 
 **The more interesting result from this update isn't in the eval's table at all.** Re-running a spec manually hit the exact failure mode that motivated building the Validator: a Skeptic test with genuinely invalid Python syntax, which — before this fix — would have failed identically every round and permanently blocked convergence, since no amount of fixing the implementation can satisfy an assertion that isn't valid code. With the Validator active, that test was caught for $0 by a local syntax check and correctly excluded, and the run **converged in round 2** instead of retrying forever. A second run confirmed the Validator doesn't over-correct either, letting a real, hard bug through when the Prover genuinely couldn't fix it in time. See `nodes/validator.py` and [eval/report.md](eval/report.md) for the full account.
+
+## Multi-language support
+
+The whole adversarial pipeline — Framer infers a spec, Prover implements it, Skeptic writes tests aimed at breaking it, the sandbox runs them for real, the Validator judges any failure — targets JavaScript as well as Python, not through a parallel implementation but the same code path with a `language` parameter threaded through every node. `breakpoint run "<request>" --language javascript` runs it end to end against Node instead of Python; the sandbox picks the matching Docker image (`node:20-slim`, pinned by digest the same way as Python's) when Docker is available, or a local `node` binary otherwise.
+
+**Run live, not just unit-tested against mocks.** Against a real spec ("reverse the words in a sentence, keeping the words themselves in the same order but each word's characters reversed"), the pipeline produced a correct `camelCase`-named JavaScript implementation, a live Skeptic model wrote 14 real adversarial tests using Node's `assert` module, all ran for real, one was correctly excluded by the Validator (a stray markdown-fence artifact in that one test's extracted source — the Validator's `node --check` caught it, exactly the invalid-test class it exists for), and the run converged. A second live run against the same spec — before a fix landed — surfaced a real gap and is documented below.
+
+**Two real bugs found live while building this, not glossed over:**
+- **A stray non-string element in the Skeptic's JSON array crashed extraction.** Despite the "respond with a JSON array of strings" instruction, a model can emit a non-string entry alongside real ones. `_extract_json_array` now skips a non-string entry instead of crashing on it — one malformed entry doesn't cost every real test in the same response.
+- **A reasoning model can leak pure prose into the Prover's "code" field with zero actual code in it.** Python's `prove()` already guarded against this with a `compile()` check and retry; the JavaScript path initially didn't (documented as a known, deliberate gap at the time), and a live run demonstrated exactly why that gap mattered — round 2 silently treated a paragraph of reasoning as "the implementation," which correctly failed every test but wasted a full retry round discovering it. Closed by adding the same guard for JavaScript via `node --check` (already built for the Validator's own syntax check), giving both languages an equivalent safety net.
+
+**What's honestly still Python-only:** the GitHub Action's `--file` mode detects `.js` and passes the right language through, but `--diff-base` mode's function-level extraction (`ast`-based) and the eval's problem set are Python-only for now — extending either to JavaScript would need a JS-aware parser or a second problem set, not just a language flag, and neither is scoped into this pass.
 
 ## GitHub Action
 
@@ -135,7 +149,7 @@ Verified against this project's own real historical data (not synthetic fixtures
 ```
 graph.py            LangGraph wiring: framer → prover → skeptic → sandbox → (loop) → arbiter
 state.py            Shared LangGraph state schema (BreakpointState)
-sandbox.py          Isolated execution — the ground truth for every verdict. Docker (real OS-level isolation) when available, a bare subprocess otherwise
+sandbox.py          Isolated execution for Python or JavaScript — the ground truth for every verdict. Docker (real OS-level isolation) when available, a bare subprocess (or local node) otherwise
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
 storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
 memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
@@ -157,7 +171,7 @@ action.yml          Composite GitHub Action wrapping verify.py for CI use
 action/
   verify_pr.py      CLI entry point: --file or --diff-base, runs verify.py per file, formats + optionally posts a PR comment
   diff_utils.py     Auto-detects changed .py files from a real git diff, and narrows each to its changed top-level function(s) via ast — no API calls needed
-tests/              142 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download
+tests/              186 tests covering the sandbox and every pure-logic module — most $0/no-network, a few requiring one-time model download or Docker/node (gracefully skipped without them, run for real in CI)
 ```
 
 ## Quickstart
@@ -171,7 +185,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 `PROVER_MODEL` and `SKEPTIC_MODEL` **must differ** — `skeptic.py` asserts this at runtime. Any two OpenRouter chat models work; free-tier `:free` slugs keep this at $0/call (check `https://openrouter.ai/api/v1/models` for the current roster — free slugs get retired and replaced over time).
 
 ```bash
-# Full test suite (142 tests) — no OpenRouter API key needed
+# Full test suite (186 tests) — no OpenRouter API key needed
 ./venv/bin/pytest
 
 # One-off run with a full round-by-round trace
@@ -180,6 +194,9 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 # CLI: run + persist to SQLite
 ./venv/bin/python cli.py run "parse a CSV row, respecting quoted commas" --max-rounds 3
 ./venv/bin/python cli.py history
+
+# Same pipeline, targeting JavaScript instead of Python
+./venv/bin/python cli.py run "reverse each word's characters, keep word order" --language javascript
 
 # See recurring bug patterns across every run so far
 ./venv/bin/python cli.py patterns

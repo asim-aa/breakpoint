@@ -13,6 +13,36 @@ import pytest
 import verify_pr
 
 
+def test_language_for_file_detects_python():
+    assert verify_pr.language_for_file("src/foo.py") == "python"
+
+
+def test_language_for_file_detects_javascript():
+    assert verify_pr.language_for_file("src/foo.js") == "javascript"
+
+
+def test_language_for_file_defaults_to_python_for_unknown_extension():
+    assert verify_pr.language_for_file("src/foo.rb") == "python"
+
+
+def test_main_passes_detected_language_through_to_verify(monkeypatch, tmp_path):
+    f = tmp_path / "foo.js"
+    f.write_text("function f(x) { return x; }")
+
+    captured = {}
+
+    def fake_verify(code, context="", **kwargs):
+        captured["language"] = kwargs.get("language")
+        return {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []}
+
+    monkeypatch.setattr(verify_pr, "verify_existing_code", fake_verify)
+    monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", str(f)])
+
+    with pytest.raises(SystemExit):
+        verify_pr.main()
+    assert captured["language"] == "javascript"
+
+
 def test_format_report_no_bugs_found():
     result = {"verdict": "no_bugs_found", "tests": [{"test_code": "t", "passed": True}], "real_bugs": [], "invalid_tests": []}
     report = verify_pr.format_report("src/foo.py", result)
@@ -50,7 +80,7 @@ def test_main_exits_zero_when_no_bugs_found(monkeypatch, tmp_path, capsys):
     f = tmp_path / "foo.py"
     f.write_text("def f(x):\n    return x")
 
-    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": {
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="", **kwargs: {
         "verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": [],
     })
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", str(f)])
@@ -64,7 +94,7 @@ def test_main_exits_nonzero_when_bugs_found(monkeypatch, tmp_path):
     f = tmp_path / "foo.py"
     f.write_text("def f(x):\n    return x")
 
-    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": {
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="", **kwargs: {
         "verdict": "bugs_found", "tests": [], "real_bugs": [{"test_code": "t", "error": "e"}], "invalid_tests": [],
     })
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", str(f)])
@@ -80,7 +110,7 @@ def test_main_does_not_post_comment_by_default(monkeypatch, tmp_path):
 
     posted = []
     monkeypatch.setattr(verify_pr, "post_pr_comment", lambda body: posted.append(body))
-    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": {
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="", **kwargs: {
         "verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": [],
     })
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", str(f)])
@@ -96,7 +126,7 @@ def test_main_posts_comment_when_flag_given(monkeypatch, tmp_path):
 
     posted = []
     monkeypatch.setattr(verify_pr, "post_pr_comment", lambda body: posted.append(body))
-    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": {
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="", **kwargs: {
         "verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": [],
     })
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--file", str(f), "--post-comment"])
@@ -124,7 +154,7 @@ def test_diff_base_verifies_every_detected_file(monkeypatch, tmp_path):
     monkeypatch.setattr(
         verify_pr,
         "verify_existing_code",
-        lambda code, context="": calls.append(code) or {
+        lambda code, context="", **kwargs: calls.append(code) or {
             "verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": [],
         },
     )
@@ -148,7 +178,7 @@ def test_diff_base_exits_nonzero_if_any_file_has_bugs(monkeypatch, tmp_path):
         {"verdict": "bugs_found", "tests": [], "real_bugs": [{"test_code": "t", "error": "e"}], "invalid_tests": []},
     ])
     monkeypatch.setattr(verify_pr, "get_changed_python_files", lambda base_ref: [str(f1), str(f2)])
-    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="": next(results))
+    monkeypatch.setattr(verify_pr, "verify_existing_code", lambda code, context="", **kwargs: next(results))
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
 
     with pytest.raises(SystemExit) as exc_info:
@@ -241,7 +271,7 @@ def test_diff_base_labels_reports_by_function_when_extraction_succeeds(monkeypat
     monkeypatch.setattr(
         verify_pr,
         "verify_existing_code",
-        lambda code, context="": calls.append(code)
+        lambda code, context="", **kwargs: calls.append(code)
         or {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []},
     )
     monkeypatch.setattr(sys, "argv", ["verify_pr.py", "--diff-base", "main"])
@@ -261,7 +291,7 @@ def test_provider_failure_on_one_file_does_not_crash_the_rest(monkeypatch, tmp_p
     f1.write_text("def a(): pass")
     f2.write_text("def b(): pass")
 
-    def flaky(code, context=""):
+    def flaky(code, context="", **kwargs):
         if "def a" in code:
             raise RuntimeError("Model x returned empty content (finish_reason='length').")
         return {"verdict": "no_bugs_found", "tests": [], "real_bugs": [], "invalid_tests": []}
