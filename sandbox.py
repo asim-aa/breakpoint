@@ -28,7 +28,14 @@ except ImportError:
 CPU_LIMIT_SECONDS = 5
 MEMORY_LIMIT_BYTES = 256 * 1024 * 1024  # 256 MB
 
-DOCKER_IMAGE = "python:3.12-slim"
+# Pinned by digest, not just tag — a compromised/republished `3.12-slim`
+# tag can't silently change what runs inside the sandbox. This is the
+# manifest-LIST digest (covers every platform Docker publishes for this
+# image, e.g. amd64 and arm64), fetched live from the registry, not
+# guessed: https://hub.docker.com/_/python — tag python:3.12-slim as of
+# 2026-09-09, image version 3.12.14-slim-trixie. Re-pin periodically to
+# pick up security patches — an old digest never updates itself.
+DOCKER_IMAGE = "python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea"
 DOCKER_MEMORY_LIMIT = "256m"
 DOCKER_CPU_LIMIT = "1"
 DOCKER_PIDS_LIMIT = "64"

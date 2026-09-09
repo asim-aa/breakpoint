@@ -16,6 +16,18 @@ from sandbox import _docker_available, run_test
 EXPECTED_ISOLATION = "docker" if _docker_available() else "subprocess"
 
 
+def test_docker_image_is_pinned_by_digest():
+    # A bare tag (e.g. "python:3.12-slim") can be silently republished by
+    # its maintainer — pinning by digest means the sandbox always runs the
+    # exact image that was reviewed, not whatever the tag currently points
+    # to. Guards against someone reverting sandbox.DOCKER_IMAGE back to a
+    # plain tag without noticing.
+    assert "@sha256:" in sandbox.DOCKER_IMAGE
+    digest = sandbox.DOCKER_IMAGE.split("@sha256:", 1)[1]
+    assert len(digest) == 64
+    assert all(c in "0123456789abcdef" for c in digest)
+
+
 def test_passing_assertion():
     code = "def add(a, b):\n    return a + b\n"
     test = "def test_add():\n    assert add(2, 3) == 5\n"

@@ -231,7 +231,7 @@ Documented here rather than glossed over — debugging an adversarial LLM pipeli
 
 - **This isn't a claim of being escape-proof.** Docker's default seccomp profile blocks a long list of dangerous syscalls, but it's not gVisor or Firecracker — a real container-escape kernel exploit is a different threat class this doesn't defend against. Treat this as a hardened boundary for adversarially-generated-but-not-malicious LLM output, not a boundary safe against a determined attacker with kernel 0-days.
 - **The subprocess fallback has all the same gaps it always did**: no seccomp/container/VM boundary, `os.system` and arbitrary syscalls work, no network blocking beyond a stripped environment, and CPU/memory limits only enforced on Linux. This path exists specifically for environments without Docker — running there is a real, honestly-labeled downgrade (`isolation="subprocess"`), not a silent one.
-- **The image itself is trusted, unpinned by digest.** `python:3.12-slim` is pulled by tag, not a content digest — a supply-chain compromise of that tag would run inside the sandbox. Fine for this project's threat model (LLM-generated algorithmic code, not adversarial humans); pin by digest before using this to run anything higher-stakes.
+- **The image is pinned by digest, not just tag** (`sandbox.DOCKER_IMAGE`, fetched live from the registry, not guessed) — a compromised or republished `3.12-slim` tag can't silently change what runs inside the sandbox. The tradeoff: a pinned digest doesn't self-update, so re-pinning periodically to pick up upstream security patches is a manual step, not automatic.
 
 Docker Desktop or a Linux Docker Engine install gets you the hardened path locally; nothing else to configure — `sandbox.py` detects and uses it automatically.
 
