@@ -75,6 +75,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | Multi-model leaderboard: compares Prover/Skeptic pairs by convergence rate and bugs caught | ✅ done — `breakpoint leaderboard` |
 | — | GitHub Action: verifies an existing PR's code (single file or auto-detected diff), not just generated code | ✅ done — run live 4x: found/fixed a real crash, then caught a real planted bug end-to-end, see below |
 | — | Function-level diff extraction: narrows `diff-base` mode to just the changed function(s), not the whole file | ✅ done — `action/diff_utils.get_changed_functions` |
+| — | Real OS-level sandbox isolation: network-none, dropped capabilities, read-only rootfs, non-root, cgroup limits | ✅ done — Docker when available, honest subprocess fallback otherwise, see Security notes |
 | — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
@@ -134,7 +135,7 @@ Verified against this project's own real historical data (not synthetic fixtures
 ```
 graph.py            LangGraph wiring: framer → prover → skeptic → sandbox → (loop) → arbiter
 state.py            Shared LangGraph state schema (BreakpointState)
-sandbox.py          Isolated subprocess execution — the ground truth for every verdict
+sandbox.py          Isolated execution — the ground truth for every verdict. Docker (real OS-level isolation) when available, a bare subprocess otherwise
 llm.py              Thin OpenRouter chat-completions client (429 backoff, token-budget handling)
 storage.py          SQLite persistence: specs / attempts / tests / bug_patterns tables
 memory.py           Bug-pattern clustering: embeds each real bug, matches or creates a cluster
@@ -218,15 +219,21 @@ Documented here rather than glossed over — debugging an adversarial LLM pipeli
 
 ## Security notes
 
-`sandbox.run_test` runs generated code in a separate subprocess (never `exec()` in-process), in a fresh temp directory, with a stripped-down environment (no inherited API keys) and a hard wall-clock timeout.
+`sandbox.run_test` runs generated code in a separate process, in a fresh temp directory, with a hard wall-clock timeout. It has two backends, chosen automatically:
 
-**Known gaps, not glossed over:**
+**Docker, when available** (`sandbox._run_in_docker`) — a real OS-level boundary, not just a stripped environment: `--network none` (a genuinely absent network namespace, not just missing env vars), `--cap-drop ALL` + `--security-opt no-new-privileges`, a `--read-only` root filesystem with the sandboxed code mounted read-only, a `--pids-limit` against fork bombs, and cgroup-enforced `--memory`/`--cpus` ceilings — the last of these also fixes the old Linux-only limitation below, since cgroup accounting doesn't depend on the host platform or the interpreter's own allocator the way `RLIMIT_AS` did. Runs as the host's own uid:gid (not root, and it avoids bind-mount permission mismatches a fixed low-privilege uid would hit) inside an ephemeral `python:3.12-slim` container, killed and removed on timeout or exit either way.
 
-- **No OS-level sandboxing.** The subprocess can still make syscalls like `os.system`, read/write outside the temp dir, or open network sockets — confirmed manually: sandboxed code calling `os.system("echo pwned")` executes successfully. There is no seccomp/container/VM boundary here. Treat this as a code-review harness for trusted-ish LLM output on a single dev machine, not a boundary safe for genuinely untrusted or hostile code.
-- **CPU/memory resource limits (`RLIMIT_CPU`, `RLIMIT_AS` via the `resource` module) are only applied on Linux.** On macOS and other non-Linux platforms, the only enforced ceiling is the wall-clock `timeout_seconds` passed to `subprocess.run` — a process that allocates a lot of memory but returns before the timeout won't be stopped.
-- **No network blocking is implemented at this layer.** The stripped environment removes API keys, but doesn't prevent a sandboxed process from opening a socket if the host machine allows it.
+**A bare subprocess, as a fallback** — when Docker isn't installed or its daemon isn't reachable, or if a specific Docker invocation fails (e.g. the daemon dies mid-run). Same as this project always used: a fresh temp dir, a stripped environment (no inherited API keys), a wall-clock timeout, and `RLIMIT_CPU`/`RLIMIT_AS` via the `resource` module on Linux only. Every `SandboxResult` carries an `isolation` field (`"docker"` or `"subprocess"`) so which boundary actually ran is never silently hidden.
 
-Before running this against genuinely untrusted code, add a real container/VM boundary — gVisor, Firecracker, or Docker with a locked-down seccomp profile and `--network none`.
+**Verified, not just configured:** `tests/test_sandbox.py` has three Docker-specific tests — network access, a filesystem write outside the sandbox, and confirming the process runs as a non-root uid — each `assert`ing the operation actually fails from *inside* the sandboxed code. They're skipped on machines without Docker (this project's own dev machine included) but run for real in CI, since GitHub's hosted runners have a live Docker daemon by default — this is proven live in this repo's own CI, not just asserted in prose.
+
+**Known gaps, not glossed over — even with Docker:**
+
+- **This isn't a claim of being escape-proof.** Docker's default seccomp profile blocks a long list of dangerous syscalls, but it's not gVisor or Firecracker — a real container-escape kernel exploit is a different threat class this doesn't defend against. Treat this as a hardened boundary for adversarially-generated-but-not-malicious LLM output, not a boundary safe against a determined attacker with kernel 0-days.
+- **The subprocess fallback has all the same gaps it always did**: no seccomp/container/VM boundary, `os.system` and arbitrary syscalls work, no network blocking beyond a stripped environment, and CPU/memory limits only enforced on Linux. This path exists specifically for environments without Docker — running there is a real, honestly-labeled downgrade (`isolation="subprocess"`), not a silent one.
+- **The image itself is trusted, unpinned by digest.** `python:3.12-slim` is pulled by tag, not a content digest — a supply-chain compromise of that tag would run inside the sandbox. Fine for this project's threat model (LLM-generated algorithmic code, not adversarial humans); pin by digest before using this to run anything higher-stakes.
+
+Docker Desktop or a Linux Docker Engine install gets you the hardened path locally; nothing else to configure — `sandbox.py` detects and uses it automatically.
 
 ## License
 
