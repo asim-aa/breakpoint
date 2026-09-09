@@ -9,6 +9,7 @@ rate limit mid-run, the eval stops and reports on however many problems it
 got through, rather than crashing with a half-written report.
 """
 
+import argparse
 import json
 import os
 import sys
@@ -26,16 +27,28 @@ from graph import build_graph
 from llm import complete
 
 EVAL_MAX_ROUNDS = 2
-PROBLEMS_PATH = Path(__file__).resolve().parent / "problems.json"
-REPORT_PATH = Path(__file__).resolve().parent / "report.md"
+EVAL_DIR = Path(__file__).resolve().parent
+
+# The JavaScript problem set uses the exact same 6 requests and difficulty
+# labels as the Python one, on purpose — this makes the two reports an
+# apples-to-apples comparison of the same conceptual problems run through
+# a different target language, not a different, harder-or-easier set.
+PROBLEMS_PATH = {
+    "python": EVAL_DIR / "problems.json",
+    "javascript": EVAL_DIR / "problems_javascript.json",
+}
+REPORT_PATH = {
+    "python": EVAL_DIR / "report.md",
+    "javascript": EVAL_DIR / "report_javascript.md",
+}
 
 
-def run_breakpoint_mode(request: str) -> dict:
+def run_breakpoint_mode(request: str, language: str = "python") -> dict:
     app = build_graph()
     result = app.invoke(
         {
             "request": request,
-            "language": "python",  # the eval problem set is Python-only for now
+            "language": language,
             "spec": {},
             "code": "",
             "pending_tests": [],
@@ -104,7 +117,15 @@ def run_baseline_mode(spec: dict, code: str) -> str:
 
 
 def main():
-    with open(PROBLEMS_PATH) as f:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--language", choices=["python", "javascript"], default="python",
+        help="target language for the eval run (default: python)",
+    )
+    args = parser.parse_args()
+    language = args.language
+
+    with open(PROBLEMS_PATH[language]) as f:
         problems = json.load(f)
 
     results = []
@@ -115,7 +136,7 @@ def main():
         print(f"[{i + 1}/{len(problems)}] {problem['id']}: {request}", flush=True)
 
         try:
-            bp = run_breakpoint_mode(request)
+            bp = run_breakpoint_mode(request, language=language)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 print("  Daily rate limit hit during Breakpoint mode — stopping eval early.", flush=True)
@@ -164,11 +185,11 @@ def main():
             flush=True,
         )
 
-    write_report(results, len(problems), stopped_early)
-    print(f"\nReport written to {REPORT_PATH}", flush=True)
+    write_report(results, len(problems), stopped_early, language=language)
+    print(f"\nReport written to {REPORT_PATH[language]}", flush=True)
 
 
-def write_report(results: list, total_problems: int, stopped_early: bool):
+def write_report(results: list, total_problems: int, stopped_early: bool, language: str = "python"):
     n = len(results)
     breakpoint_caught = sum(1 for r in results if r["breakpoint_round1_bug_found"])
     baseline_missed = sum(
@@ -182,15 +203,26 @@ def write_report(results: list, total_problems: int, stopped_early: bool):
         sum(r["breakpoint_rounds_taken"] for r in results) / n if n else 0
     )
 
+    display_language = {"python": "Python", "javascript": "JavaScript"}[language]
+
     lines = []
-    lines.append("# Breakpoint eval report\n")
+    lines.append(f"# Breakpoint eval report ({display_language})\n")
     lines.append(
         f"**Sample size: N={n}"
         + (f" of {total_problems} planned" if n < total_problems else "")
-        + "**. This is a small eval — these numbers indicate a direction, "
-        "not a statistically reliable rate. Do not extrapolate beyond this "
-        "specific problem set and this specific model pair.\n"
+        + f"**. Target language: **{display_language}**. This is a small eval — "
+        "these numbers indicate a direction, not a statistically reliable "
+        "rate. Do not extrapolate beyond this specific problem set and this "
+        "specific model pair.\n"
     )
+    if language == "javascript":
+        lines.append(
+            "**Comparison note:** this uses the exact same 6 problems and "
+            "difficulty labels as [report.md](report.md) (the Python eval) — "
+            "same requests, run through the identical pipeline against a "
+            "different target language — so the two reports are a direct "
+            "comparison, not two unrelated problem sets.\n"
+        )
     if stopped_early:
         lines.append(
             "> **Note:** this run stopped early after hitting OpenRouter's "
@@ -237,7 +269,7 @@ def write_report(results: list, total_problems: int, stopped_early: bool):
         f"from `bugs_caught` and never fed back to the Prover."
     )
 
-    with open(REPORT_PATH, "w") as f:
+    with open(REPORT_PATH[language], "w") as f:
         f.write("\n".join(lines) + "\n")
 
 

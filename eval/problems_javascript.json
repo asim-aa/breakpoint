@@ -1,0 +1,32 @@
+[
+  {
+    "id": "merge_intervals",
+    "difficulty": "easy",
+    "request": "merge overlapping intervals in a list of [start, end] pairs"
+  },
+  {
+    "id": "first_last_index",
+    "difficulty": "boundary-heavy",
+    "request": "given a sorted array of integers, find the first and last index of a target value, returning [-1, -1] if the target is not found"
+  },
+  {
+    "id": "two_sum_indices",
+    "difficulty": "spec-ambiguous",
+    "request": "given a list of integers, return the two indices whose values sum to a given target, or None if no pair exists"
+  },
+  {
+    "id": "csv_row_parse",
+    "difficulty": "boundary-heavy",
+    "request": "parse a CSV row into a list of fields, respecting double-quoted fields that may contain commas"
+  },
+  {
+    "id": "reverse_words_preserve_whitespace",
+    "difficulty": "spec-ambiguous",
+    "request": "reverse the words in a sentence while preserving the whitespace between them"
+  },
+  {
+    "id": "valid_palindrome",
+    "difficulty": "moderate",
+    "request": "check whether a string is a valid palindrome, ignoring case, spaces, and punctuation"
+  }
+]
