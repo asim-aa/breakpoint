@@ -188,8 +188,22 @@ def main():
             flush=True,
         )
 
+    report_path = REPORT_PATH[language]
+    if not results and report_path.exists():
+        # A run that completed zero problems (e.g. the daily rate limit hit
+        # before the very first one finished) has nothing worth reporting —
+        # writing it would silently clobber a real, previously-earned report
+        # with an empty one. Refuse rather than destroy good data; the
+        # skipped/stopped_early reasons are already printed above.
+        print(
+            f"\n0/{len(problems)} problems completed — refusing to overwrite "
+            f"the existing report at {report_path} with an empty one. Nothing written.",
+            flush=True,
+        )
+        return
+
     write_report(results, len(problems), stopped_early, language=language, skipped=skipped)
-    print(f"\nReport written to {REPORT_PATH[language]}", flush=True)
+    print(f"\nReport written to {report_path}", flush=True)
 
 
 def write_report(
