@@ -241,11 +241,12 @@ def write_report(
     )
     if language == "javascript":
         lines.append(
-            "**Comparison note:** this uses the exact same 6 problems and "
-            "difficulty labels as [report.md](report.md) (the Python eval) — "
-            "same requests, run through the identical pipeline against a "
-            "different target language — so the two reports are a direct "
-            "comparison, not two unrelated problem sets.\n"
+            f"**Comparison note:** this uses the exact same {total_problems} "
+            "problems and difficulty labels as [report.md](report.md) (the "
+            "Python eval) — same requests, run through the identical "
+            "pipeline against a different target language — so the two "
+            "reports are a direct comparison, not two unrelated problem "
+            "sets.\n"
         )
     if stopped_early:
         lines.append(

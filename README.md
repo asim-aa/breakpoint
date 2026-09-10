@@ -69,7 +69,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | V2 | Skeptic (different model) + full LangGraph wiring | ✅ done |
 | V3 | Retry loop, bounded by a round budget | ✅ done |
 | V4a | Arbiter (verdict / confidence / coverage) + SQLite persistence + CLI | ✅ done |
-| V4b | 6-problem eval vs. a non-adversarial self-check baseline | ✅ done — see [eval/report.md](eval/report.md) |
+| V4b | Eval vs. a non-adversarial self-check baseline (10 problems as of the latest addition) | ✅ done — see [eval/report.md](eval/report.md) |
 | — | Validator: test-contract validation (not in original V4 scope, added after finding the gap live) | ✅ done |
 | — | Bug-pattern memory: clusters real bugs across runs (the original charter's "Memory" component) | ✅ done — `breakpoint patterns` |
 | — | Per-model bug report: which bug patterns a specific Prover model reliably produces | ✅ done — `breakpoint model-report [model]` |
@@ -77,12 +77,12 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | GitHub Action: verifies an existing PR's code (single file or auto-detected diff), not just generated code | ✅ done — run live 4x: found/fixed a real crash, then caught a real planted bug end-to-end, see below |
 | — | Function-level diff extraction: narrows `diff-base` mode to just the changed function(s), not the whole file | ✅ done — `action/diff_utils.get_changed_functions` |
 | — | Real OS-level sandbox isolation: network-none, dropped capabilities, read-only rootfs, non-root, cgroup limits | ✅ done — Docker when available, honest subprocess fallback otherwise, see Security notes |
-| — | Multi-language support: the full adversarial pipeline (Framer/Prover/Skeptic/sandbox/Validator) targets JavaScript, not just Python | ✅ done — `--language javascript`, run live end-to-end including a real 6-problem eval, see below. GitHub Action's `--file` mode also detects `.js`; `diff-base` mode's function-level extraction stays Python-only |
+| — | Multi-language support: the full adversarial pipeline (Framer/Prover/Skeptic/sandbox/Validator) targets JavaScript, not just Python | ✅ done — `--language javascript`, run live end-to-end including a real eval, see below. GitHub Action's `--file` mode also detects `.js`; `diff-base` mode's function-level extraction stays Python-only |
 | — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
 
-The eval now runs with the Validator active (see below), on the full N=6 problem set — the 6th problem needed three attempts across two sessions to complete, due to a retired free-tier Skeptic model and a sustained Nvidia outage, both logged plainly rather than hidden (see the methodology note in the report). Earlier eval runs (before the Validator existed) showed the core thesis clearly: **a non-adversarial self-check said "correct" on 3 different implementations that real, executed tests proved were buggy.** Full breakdown, exact numbers, and known limitations for the current run — stated plainly, not smoothed over — are in [eval/report.md](eval/report.md).
+The eval now runs with the Validator active (see below). `eval/problems.json` has since grown to 10 problems (4 added after the initial N=6 run, to give both the Python and the new JavaScript eval more data) — [eval/report.md](eval/report.md) documents the original N=6 run specifically, including a real, honestly-logged gap: the 6th problem needed three attempts across two sessions to complete, due to a retired free-tier Skeptic model and a sustained Nvidia outage. The report hasn't been rerun against the full 10 yet — `eval/run_eval.py` reruns it. Earlier eval runs (before the Validator existed) showed the core thesis clearly: **a non-adversarial self-check said "correct" on 3 different implementations that real, executed tests proved were buggy.** Full breakdown, exact numbers, and known limitations for that run — stated plainly, not smoothed over — are in [eval/report.md](eval/report.md).
 
 **The more interesting result from this update isn't in the eval's table at all.** Re-running a spec manually hit the exact failure mode that motivated building the Validator: a Skeptic test with genuinely invalid Python syntax, which — before this fix — would have failed identically every round and permanently blocked convergence, since no amount of fixing the implementation can satisfy an assertion that isn't valid code. With the Validator active, that test was caught for $0 by a local syntax check and correctly excluded, and the run **converged in round 2** instead of retrying forever. A second run confirmed the Validator doesn't over-correct either, letting a real, hard bug through when the Prover genuinely couldn't fix it in time. See `nodes/validator.py` and [eval/report.md](eval/report.md) for the full account.
 
@@ -96,7 +96,7 @@ The whole adversarial pipeline — Framer infers a spec, Prover implements it, S
 - **A stray non-string element in the Skeptic's JSON array crashed extraction.** Despite the "respond with a JSON array of strings" instruction, a model can emit a non-string entry alongside real ones. `_extract_json_array` now skips a non-string entry instead of crashing on it — one malformed entry doesn't cost every real test in the same response.
 - **A reasoning model can leak pure prose into the Prover's "code" field with zero actual code in it.** Python's `prove()` already guarded against this with a `compile()` check and retry; the JavaScript path initially didn't (documented as a known, deliberate gap at the time), and a live run demonstrated exactly why that gap mattered — round 2 silently treated a paragraph of reasoning as "the implementation," which correctly failed every test but wasted a full retry round discovering it. Closed by adding the same guard for JavaScript via `node --check` (already built for the Validator's own syntax check), giving both languages an equivalent safety net.
 
-**A real 6-problem JavaScript eval, not just one example.** [eval/report_javascript.md](eval/report_javascript.md) runs the exact same 6 problems and difficulty labels as the Python eval ([eval/report.md](eval/report.md)) — same requests, run through the identical pipeline against a different target language, so the two are a direct comparison rather than separate problem sets. Result: **2/5 problems caught a real bug in the first attempt**, the same-model no-execution baseline missed both, and 4/5 converged — directionally consistent with the Python eval. `csv_row_parse` is honestly missing, not silently dropped: the Skeptic model exhausted its retries returning empty content even at an 8000-token budget (a real, reproducible limitation for this specific problem's complexity), and a same-day retry then hit OpenRouter's shared daily rate limit before completing — left as a stated gap rather than retried indefinitely against a finite quota. `run_eval.py --language javascript` reruns it.
+**A real JavaScript eval, not just one example.** [eval/report_javascript.md](eval/report_javascript.md) documents a run against the original N=6 problem set — the exact same 6 problems and difficulty labels as that run of the Python eval ([eval/report.md](eval/report.md)), same requests through the identical pipeline against a different target language, for a direct comparison rather than separate problem sets. Result: **2/5 problems caught a real bug in the first attempt**, the same-model no-execution baseline missed both, and 4/5 converged — directionally consistent with the Python eval. `csv_row_parse` is honestly missing from that run, not silently dropped: the Skeptic model exhausted its retries returning empty content even at an 8000-token budget (a real, reproducible limitation for this specific problem's complexity), and a same-day retry then hit OpenRouter's shared daily rate limit before completing — left as a stated gap rather than retried indefinitely against a finite quota. The problem set has since grown to 10 (both languages, kept identical for the comparison); `run_eval.py --language javascript` reruns it against the current set.
 
 **What's honestly still Python-only:** the GitHub Action's `--file` mode detects `.js` and passes the right language through, but `--diff-base` mode's function-level extraction (`ast`-based) has no JavaScript equivalent yet — that would need a JS-aware parser, not just a language flag, and isn't scoped into this pass.
 
@@ -166,8 +166,8 @@ nodes/
   validator.py      Judges whether a failing test is a real bug or an invalid test (bad syntax, or an assertion that's wrong on its own terms) — a free local syntax check first, an LLM call only if that passes
   arbiter.py        Final verdict + confidence heuristic (formula documented in-code, not pretended to be rigorous)
 eval/
-  problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
-  problems_javascript.json  The exact same 6 problems, for a direct Python vs. JavaScript comparison
+  problems.json     10 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
+  problems_javascript.json  The exact same 10 problems, for a direct Python vs. JavaScript comparison
   run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md (--language javascript writes eval/report_javascript.md)
 verify.py           Verifies EXISTING code (no Prover, no retry loop) — the GitHub Action's core
 action.yml          Composite GitHub Action wrapping verify.py for CI use
@@ -216,7 +216,7 @@ cp .env.example .env   # fill in OPENROUTER_API_KEY, PROVER_MODEL, SKEPTIC_MODEL
 # Browse all of the above visually instead of in a terminal
 ./venv/bin/python cli.py dashboard
 
-# The 6-problem eval
+# The 10-problem eval
 ./venv/bin/python eval/run_eval.py
 ```
 
@@ -224,7 +224,7 @@ The leaderboard has no dedicated "run every model pair" script on purpose: `stor
 
 ### A note on OpenRouter's free tier
 
-The free-tier daily cap is **50 requests/day, account-wide** — every `:free` model shares one bucket, it isn't per-model. A single retry-loop run can cost 5–10 requests; the full 6-problem eval can need 30–40+. A one-time $10 balance raises the cap to 1000/day without changing the per-call cost of `:free` models (the $10 is a threshold OpenRouter checks, not something free models spend down). `llm.py` retries on `429` using the `Retry-After` header, and the eval runner degrades gracefully — skipping a problem or stopping early with an honestly-labeled partial report — rather than crashing on quota exhaustion.
+The free-tier daily cap is **50 requests/day, account-wide** — every `:free` model shares one bucket, it isn't per-model. A single retry-loop run can cost 5–10 requests; the full 10-problem eval can need 50–70+. A one-time $10 balance raises the cap to 1000/day without changing the per-call cost of `:free` models (the $10 is a threshold OpenRouter checks, not something free models spend down). `llm.py` retries on `429` using the `Retry-After` header, and the eval runner degrades gracefully — skipping a problem or stopping early with an honestly-labeled partial report — rather than crashing on quota exhaustion.
 
 ## Real bugs found and fixed while building this
 

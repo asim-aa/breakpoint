@@ -28,5 +28,25 @@
     "id": "valid_palindrome",
     "difficulty": "moderate",
     "request": "check whether a string is a valid palindrome, ignoring case, spaces, and punctuation"
+  },
+  {
+    "id": "dedupe_preserve_order",
+    "difficulty": "easy",
+    "request": "remove duplicate values from a list while preserving the order of their first occurrence"
+  },
+  {
+    "id": "merge_two_sorted_arrays",
+    "difficulty": "boundary-heavy",
+    "request": "merge two sorted lists of integers into a single sorted list"
+  },
+  {
+    "id": "first_non_repeating_char",
+    "difficulty": "spec-ambiguous",
+    "request": "find the first character in a string that does not repeat, or return None if every character repeats"
+  },
+  {
+    "id": "max_profit_single_trade",
+    "difficulty": "moderate",
+    "request": "given a list of daily stock prices, find the maximum profit achievable from a single buy followed by a later sell"
   }
 ]
