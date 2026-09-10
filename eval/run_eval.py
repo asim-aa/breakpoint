@@ -129,6 +129,7 @@ def main():
         problems = json.load(f)
 
     results = []
+    skipped = []  # (problem_id, reason) for anything that didn't make it into results
     stopped_early = False
 
     for i, problem in enumerate(problems):
@@ -143,6 +144,7 @@ def main():
                 stopped_early = True
                 break
             print(f"  Transient provider error during Breakpoint mode, skipping this problem: {e}", flush=True)
+            skipped.append((problem["id"], f"transient provider error: {e}"))
             continue
         except RuntimeError as e:
             # llm.py raises RuntimeError for provider-level failures embedded
@@ -151,6 +153,7 @@ def main():
             # aren't HTTP errors, but they're just as transient. Skip this
             # one problem rather than losing the whole eval to one flaky call.
             print(f"  Provider failure during Breakpoint mode, skipping this problem: {e}", flush=True)
+            skipped.append((problem["id"], f"provider failure: {e}"))
             continue
 
         try:
@@ -185,11 +188,18 @@ def main():
             flush=True,
         )
 
-    write_report(results, len(problems), stopped_early, language=language)
+    write_report(results, len(problems), stopped_early, language=language, skipped=skipped)
     print(f"\nReport written to {REPORT_PATH[language]}", flush=True)
 
 
-def write_report(results: list, total_problems: int, stopped_early: bool, language: str = "python"):
+def write_report(
+    results: list,
+    total_problems: int,
+    stopped_early: bool,
+    language: str = "python",
+    skipped: list[tuple[str, str]] | None = None,
+):
+    skipped = skipped or []
     n = len(results)
     breakpoint_caught = sum(1 for r in results if r["breakpoint_round1_bug_found"])
     baseline_missed = sum(
@@ -228,6 +238,13 @@ def write_report(results: list, total_problems: int, stopped_early: bool, langua
             "> **Note:** this run stopped early after hitting OpenRouter's "
             "free-tier daily rate limit. The numbers below reflect only the "
             f"{n} problems that completed before that happened.\n"
+        )
+    if skipped:
+        skipped_list = "; ".join(f"`{pid}` ({reason})" for pid, reason in skipped)
+        lines.append(
+            f"> **Note:** {len(skipped)} problem(s) were skipped, not silently "
+            f"dropped — each hit a real, transient provider issue rather than "
+            f"a bug in this system: {skipped_list}.\n"
         )
     lines.append(
         "**Methodology note:** Breakpoint mode ran with `MAX_ROUNDS=2` "

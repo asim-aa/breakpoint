@@ -77,7 +77,7 @@ Built as a LangGraph `StateGraph` with one conditional edge — the retry loop i
 | — | GitHub Action: verifies an existing PR's code (single file or auto-detected diff), not just generated code | ✅ done — run live 4x: found/fixed a real crash, then caught a real planted bug end-to-end, see below |
 | — | Function-level diff extraction: narrows `diff-base` mode to just the changed function(s), not the whole file | ✅ done — `action/diff_utils.get_changed_functions` |
 | — | Real OS-level sandbox isolation: network-none, dropped capabilities, read-only rootfs, non-root, cgroup limits | ✅ done — Docker when available, honest subprocess fallback otherwise, see Security notes |
-| — | Multi-language support: the full adversarial pipeline (Framer/Prover/Skeptic/sandbox/Validator) targets JavaScript, not just Python | ✅ done — `--language javascript`, run live end-to-end, see below. GitHub Action's `--file` mode also detects `.js`; `diff-base` mode and the eval stay Python-only for now |
+| — | Multi-language support: the full adversarial pipeline (Framer/Prover/Skeptic/sandbox/Validator) targets JavaScript, not just Python | ✅ done — `--language javascript`, run live end-to-end including a real 6-problem eval, see below. GitHub Action's `--file` mode also detects `.js`; `diff-base` mode's function-level extraction stays Python-only |
 | — | Web dashboard: browse runs/patterns/leaderboard visually instead of in a terminal | ✅ done — `breakpoint dashboard` |
 
 ## Eval results
@@ -96,7 +96,9 @@ The whole adversarial pipeline — Framer infers a spec, Prover implements it, S
 - **A stray non-string element in the Skeptic's JSON array crashed extraction.** Despite the "respond with a JSON array of strings" instruction, a model can emit a non-string entry alongside real ones. `_extract_json_array` now skips a non-string entry instead of crashing on it — one malformed entry doesn't cost every real test in the same response.
 - **A reasoning model can leak pure prose into the Prover's "code" field with zero actual code in it.** Python's `prove()` already guarded against this with a `compile()` check and retry; the JavaScript path initially didn't (documented as a known, deliberate gap at the time), and a live run demonstrated exactly why that gap mattered — round 2 silently treated a paragraph of reasoning as "the implementation," which correctly failed every test but wasted a full retry round discovering it. Closed by adding the same guard for JavaScript via `node --check` (already built for the Validator's own syntax check), giving both languages an equivalent safety net.
 
-**What's honestly still Python-only:** the GitHub Action's `--file` mode detects `.js` and passes the right language through, but `--diff-base` mode's function-level extraction (`ast`-based) and the eval's problem set are Python-only for now — extending either to JavaScript would need a JS-aware parser or a second problem set, not just a language flag, and neither is scoped into this pass.
+**A real 6-problem JavaScript eval, not just one example.** [eval/report_javascript.md](eval/report_javascript.md) runs the exact same 6 problems and difficulty labels as the Python eval ([eval/report.md](eval/report.md)) — same requests, run through the identical pipeline against a different target language, so the two are a direct comparison rather than separate problem sets. Result: **2/5 problems caught a real bug in the first attempt**, the same-model no-execution baseline missed both, and 4/5 converged — directionally consistent with the Python eval. `csv_row_parse` is honestly missing, not silently dropped: the Skeptic model exhausted its retries returning empty content even at an 8000-token budget (a real, reproducible limitation for this specific problem's complexity), and a same-day retry then hit OpenRouter's shared daily rate limit before completing — left as a stated gap rather than retried indefinitely against a finite quota. `run_eval.py --language javascript` reruns it.
+
+**What's honestly still Python-only:** the GitHub Action's `--file` mode detects `.js` and passes the right language through, but `--diff-base` mode's function-level extraction (`ast`-based) has no JavaScript equivalent yet — that would need a JS-aware parser, not just a language flag, and isn't scoped into this pass.
 
 ## GitHub Action
 
@@ -165,7 +167,8 @@ nodes/
   arbiter.py        Final verdict + confidence heuristic (formula documented in-code, not pretended to be rigorous)
 eval/
   problems.json     6 hand-written problems: easy, boundary-heavy, and deliberately spec-ambiguous
-  run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md
+  problems_javascript.json  The exact same 6 problems, for a direct Python vs. JavaScript comparison
+  run_eval.py       Runs the full graph + a baseline self-check on all 6, writes eval/report.md (--language javascript writes eval/report_javascript.md)
 verify.py           Verifies EXISTING code (no Prover, no retry loop) — the GitHub Action's core
 action.yml          Composite GitHub Action wrapping verify.py for CI use
 action/
